@@ -594,6 +594,18 @@ func parseUUID(s string) pgtype.UUID {
 	return util.MustParseUUID(s)
 }
 
+// optionalUUID returns a NULL pgtype.UUID for an empty string and otherwise
+// behaves like parseUUID. Use this for actor IDs on events where the producer
+// may legitimately be a "system" actor with no member/agent attribution
+// (e.g. GitHub webhook auto-status sync) — the activity_log and inbox_item
+// tables both allow actor_id to be NULL.
+func optionalUUID(s string) pgtype.UUID {
+	if s == "" {
+		return pgtype.UUID{}
+	}
+	return util.MustParseUUID(s)
+}
+
 func splitAndTrim(s string) []string {
 	if s == "" {
 		return nil

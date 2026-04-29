@@ -27,12 +27,18 @@ export function IntegrationsTab() {
   const user = useAuthStore((s) => s.user);
   const qc = useQueryClient();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data, isLoading } = useQuery(githubInstallationsOptions(wsId));
   const [connecting, setConnecting] = useState(false);
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManage = currentMember?.role === "owner" || currentMember?.role === "admin";
 
+  // The list endpoint is admin-only; non-admins would see a 403 toast and
+  // an empty configured state. Gate the query on canManage so members get
+  // a clean read-only view.
+  const { data, isLoading } = useQuery({
+    ...githubInstallationsOptions(wsId),
+    enabled: !!wsId && canManage,
+  });
   const installations = data?.installations ?? [];
   const configured = data?.configured ?? false;
 
@@ -93,7 +99,7 @@ export function IntegrationsTab() {
               )}
             </div>
 
-            {!configured && (
+            {canManage && !configured && (
               <p className="text-xs text-muted-foreground">
                 GitHub integration is not configured for this deployment. Operators must set{" "}
                 <code className="rounded bg-muted px-1 py-0.5 text-[10px]">GITHUB_APP_SLUG</code>{" "}
@@ -102,7 +108,7 @@ export function IntegrationsTab() {
               </p>
             )}
 
-            {configured && (
+            {canManage && configured && (
               <div className="space-y-2">
                 {isLoading && <p className="text-xs text-muted-foreground">Loading…</p>}
                 {!isLoading && installations.length === 0 && (

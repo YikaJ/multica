@@ -33,8 +33,9 @@ RETURNING *;
 -- name: DeleteGitHubInstallation :exec
 DELETE FROM github_installation WHERE id = $1 AND workspace_id = $2;
 
--- name: DeleteGitHubInstallationByInstallationID :exec
-DELETE FROM github_installation WHERE installation_id = $1;
+-- name: DeleteGitHubInstallationByInstallationID :one
+DELETE FROM github_installation WHERE installation_id = $1
+RETURNING id, workspace_id;
 
 -- =====================
 -- GitHub Pull Request

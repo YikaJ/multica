@@ -104,6 +104,11 @@ func githubAppSlug() string { return strings.TrimSpace(os.Getenv("GITHUB_APP_SLU
 // configure one value.
 func githubWebhookSecret() string { return strings.TrimSpace(os.Getenv("GITHUB_WEBHOOK_SECRET")) }
 
+// isGitHubConfigured returns true only when BOTH the install slug and the
+// webhook secret are set. The Connect button uses this single flag, so the
+// frontend never offers a flow that the backend would reject.
+func isGitHubConfigured() bool { return githubAppSlug() != "" && githubWebhookSecret() != "" }
+
 // signState produces an opaque token that binds a workspace ID to the
 // install flow so the setup callback can recover the workspace without
 // trusting query params alone. Format: "<workspaceID>.<nonce>.<sigHex>".
@@ -154,11 +159,11 @@ func (h *Handler) GitHubConnect(w http.ResponseWriter, r *http.Request) {
 	if _, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id"); !ok {
 		return
 	}
-	slug := githubAppSlug()
-	if slug == "" || githubWebhookSecret() == "" {
+	if !isGitHubConfigured() {
 		writeJSON(w, http.StatusOK, GitHubConnectResponse{Configured: false})
 		return
 	}
+	slug := githubAppSlug()
 	state, err := signState(workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to sign state")
@@ -304,7 +309,7 @@ func (h *Handler) ListGitHubInstallations(w http.ResponseWriter, r *http.Request
 	for _, row := range rows {
 		out = append(out, githubInstallationToResponse(row))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"installations": out, "configured": githubAppSlug() != ""})
+	writeJSON(w, http.StatusOK, map[string]any{"installations": out, "configured": isGitHubConfigured()})
 }
 
 func (h *Handler) DeleteGitHubInstallation(w http.ResponseWriter, r *http.Request) {
@@ -433,13 +438,21 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 	switch p.Action {
 	case "deleted", "suspend":
 		// User removed the App on GitHub — drop our row so the workspace
-		// stops trusting this installation_id.
-		if err := h.Queries.DeleteGitHubInstallationByInstallationID(ctx, p.Installation.ID); err != nil {
+		// stops trusting this installation_id. We DELETE … RETURNING so
+		// the broadcast can be scoped to the right workspace; events
+		// without WorkspaceID are dropped by the realtime listener and
+		// would leave already-open Settings tabs stale.
+		deleted, err := h.Queries.DeleteGitHubInstallationByInstallationID(ctx, p.Installation.ID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return // already gone — nothing to broadcast
+			}
 			slog.Warn("github: delete installation failed", "err", err, "installation_id", p.Installation.ID)
 			return
 		}
-		h.publish(protocol.EventGitHubInstallationDeleted, "", "system", "", map[string]any{
+		h.publish(protocol.EventGitHubInstallationDeleted, uuidToString(deleted.WorkspaceID), "system", "", map[string]any{
 			"installation_id": p.Installation.ID,
+			"id":              uuidToString(deleted.ID),
 		})
 	case "created", "new_permissions_accepted", "unsuspend":
 		// We don't know which workspace this maps to from the webhook
