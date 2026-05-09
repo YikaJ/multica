@@ -294,7 +294,6 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Issue live banner now shows agent tasks waiting in queue",
           "Failed or cancelled tasks can be rerun in one click from the Execution Log",
           "Agent Create modal gains an expand button for editing long descriptions",
-          "New PostHog telemetry: task-dispatched event plus a set of core product metrics",
         ],
         improvements: [
           "Issue timeline no longer fully re-renders on every WebSocket event — long issues scroll smoothly",

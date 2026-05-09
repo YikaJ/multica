@@ -294,7 +294,6 @@ export function createZhDict(allowSignup: boolean): LandingDict {
           "Issue Live Banner 显示 agent 队列中等待执行的任务",
           "失败 / 取消的任务可以在 Execution Log 一键重跑",
           "Agent Create 弹窗新增放大按钮，长描述编辑更舒服",
-          "新增 PostHog 埋点：task dispatched 事件以及一组核心产品指标",
         ],
         improvements: [
           "Issue Timeline 不再因每个 WS 事件做完整 re-render，长 Issue 滚动更顺",
