@@ -197,6 +197,31 @@ SELECT * FROM agent_runtime
 WHERE workspace_id = $1 AND owner_id = $2
 ORDER BY created_at ASC;
 
+-- name: ForceOfflineRuntimesByIDs :many
+-- Unconditionally flips a known set of runtime IDs to offline. Distinct from
+-- MarkRuntimesOfflineByIDs (which keeps a stale-window predicate so the
+-- sweeper cannot demote a runtime that just heartbeated): this variant is
+-- used by intentional revocation paths — e.g. removing a workspace member —
+-- where the caller has already decided the runtime should be offline
+-- regardless of recent liveness.
+UPDATE agent_runtime
+SET status = 'offline', updated_at = now()
+WHERE id = ANY(@runtime_ids::uuid[]) AND status = 'online'
+RETURNING id, workspace_id, owner_id, daemon_id, provider;
+
+-- name: CancelAgentTasksByRuntime :many
+-- Cancels every active task on any runtime in the given set. Used by the
+-- member-revocation flow: when a leaving member's runtimes are taken away,
+-- their in-flight tasks must stop rather than fail-with-error so the daemon's
+-- cancellation poller (which interrupts on status='cancelled') can shut the
+-- local agent down cleanly. Returns the affected rows so the caller can
+-- broadcast task:cancelled and reconcile per-agent status.
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now()
+WHERE runtime_id = ANY(@runtime_ids::uuid[])
+  AND status IN ('queued', 'dispatched', 'running')
+RETURNING *;
+
 -- name: DeleteAgentRuntime :exec
 DELETE FROM agent_runtime WHERE id = $1;
 
