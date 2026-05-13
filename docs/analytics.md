@@ -373,11 +373,21 @@ not have a workspace yet.
 All in-product onboarding events carry an `onboarding_session_id` so the funnel
 can be reconstructed without joining on `distinct_id` alone. The id is generated
 client-side at `onboarding_started`, persisted across reloads, attached to every
-subsequent onboarding event, and cleared on `onboarding_completed`. Paths that
-bypass the funnel entirely — `skip_existing` from Welcome and `invite_accept` —
-do not start a session and emit `onboarding_completed` with the property
-omitted. Funnel queries should filter `onboarding_session_id IS NOT NULL` to
-isolate real funnel completions from these soft-completions.
+subsequent onboarding event, and cleared on `onboarding_completed`.
+
+Paths that bypass the in-product funnel emit `onboarding_completed` with the
+property omitted:
+
+- `skip_existing` from Welcome — the Welcome step clears the session before
+  completing, since the user never entered any real onboarding step. Their
+  earlier `onboarding_started` *does* carry a session id, but their completion
+  does not.
+- `invite_accept` — server-side completion path that never receives a session
+  id from the client.
+
+Funnel queries should filter `onboarding_session_id IS NOT NULL` on
+`onboarding_completed` to isolate real funnel completions from these
+soft-completions.
 
 ### `onboarding_questionnaire_submitted`
 

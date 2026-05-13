@@ -7,6 +7,7 @@ import { captureEvent } from "@multica/core/analytics";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import {
+  clearOnboardingSession,
   completeOnboarding,
   ONBOARDING_STEP_ORDER,
   saveQuestionnaire,
@@ -127,6 +128,12 @@ export function OnboardingFlow({
   // StarterContentPrompt dialog on arrival — which is correct, since
   // they never got a starter project and may want one now.
   const handleWelcomeSkip = useCallback(async () => {
+    // skip_existing is NOT a real funnel completion — the user bounced at
+    // Welcome without entering any onboarding step. Drop the session id
+    // first so `completeOnboarding` doesn't forward it to the server,
+    // which keeps `onboarding_session_id` absent on these soft completions
+    // and lets HogQL filter `IS NOT NULL` to isolate real funnel exits.
+    clearOnboardingSession();
     try {
       await completeOnboarding("skip_existing", workspaces[0]?.id);
     } catch (err) {
