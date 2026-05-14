@@ -236,7 +236,6 @@ export function SquadDetailPage() {
           onCreateAgentClick={isWorkspaceAdmin ? () => setShowCreateAgent(true) : undefined}
           onSetLeader={(id) => setLeaderMut.mutate(id)}
           onRemoveMember={(m) => removeMemberMut.mutate(m)}
-          onViewAgent={(agentId) => push(p.agentDetail(agentId))}
           onUpdateRole={async (m, role) => { await updateRoleMut.mutateAsync({ member: m, role }); }}
           onSaveInstructions={async (next) => { await updateSquadMut.mutateAsync({ instructions: next }); toast.success("Instructions saved"); }}
           setLeaderPending={setLeaderMut.isPending}
@@ -916,7 +915,6 @@ function SquadOverviewPane({
   onSetLeader,
   onRemoveMember,
   onUpdateRole,
-  onViewAgent,
   onSaveInstructions,
   setLeaderPending,
 }: {
@@ -932,7 +930,6 @@ function SquadOverviewPane({
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
-  onViewAgent: (agentId: string) => void;
   onSaveInstructions: (next: string) => Promise<void>;
   setLeaderPending: boolean;
 }) {
@@ -987,7 +984,6 @@ function SquadOverviewPane({
               onSetLeader={onSetLeader}
               onRemoveMember={onRemoveMember}
               onUpdateRole={onUpdateRole}
-              onViewAgent={onViewAgent}
               setLeaderPending={setLeaderPending}
             />
           </div>
@@ -1035,7 +1031,6 @@ function SquadMembersTab({
   onSetLeader,
   onRemoveMember,
   onUpdateRole,
-  onViewAgent,
   setLeaderPending,
 }: {
   members: SquadMember[];
@@ -1047,10 +1042,10 @@ function SquadMembersTab({
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
-  onViewAgent: (agentId: string) => void;
   setLeaderPending: boolean;
 }) {
   const { t } = useT("squads");
+  const p = useWorkspacePaths();
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -1094,20 +1089,18 @@ function SquadMembersTab({
                 onSave={async (next) => { await onUpdateRole(m, next); }}
               />
             </div>
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
               {m.member_type === "agent" && (
                 <Tooltip>
                   <TooltipTrigger
                     render={
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-muted-foreground hover:text-foreground h-8 w-8 p-0"
-                        onClick={() => onViewAgent(m.member_id)}
+                      <AppLink
+                        href={p.agentDetail(m.member_id)}
+                        className="inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                         aria-label={t(($) => $.members_tab.view_agent_tooltip)}
                       >
                         <ArrowUpRight className="size-3.5" />
-                      </Button>
+                      </AppLink>
                     }
                   />
                   <TooltipContent>
