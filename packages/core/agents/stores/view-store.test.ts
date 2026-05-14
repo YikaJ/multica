@@ -75,4 +75,22 @@ describe("useAgentsViewStore", () => {
     await flush();
     expect(useAgentsViewStore.getState().scope).toBe("mine");
   });
+
+  it("resets to 'mine' when switching to a workspace with no persisted value", async () => {
+    localStorage.setItem(
+      "multica_agents_view:acme",
+      JSON.stringify({ state: { scope: "all" }, version: 0 }),
+    );
+
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    await flush();
+    expect(useAgentsViewStore.getState().scope).toBe("all");
+
+    setCurrentWorkspace("beta", "ws_b");
+    await flush();
+    await flush();
+    expect(useAgentsViewStore.getState().scope).toBe("mine");
+    expect(localStorage.getItem("multica_agents_view:acme")).not.toBeNull();
+  });
 });
