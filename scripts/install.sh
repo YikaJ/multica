@@ -4,10 +4,22 @@
 # Install / upgrade CLI only:
 #   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 #
+# Install CLI + register this machine as a Computer in one shot (RFC v6.1 §6.4):
+#   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh \
+#       | sh -s -- --workspace <slug> --token <mit_…>
+#   ( --server-url is optional; defaults to Multica Cloud. )
+#
 # Install CLI + provision self-host server:
 #   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
 #
-# After installation, run `multica setup` to configure your environment.
+# Diagnostics:
+#   --diagnose       Run the one-liner install and write a redacted log bundle
+#                    to $HOME/Library/Logs/Multica (macOS) or $HOME/.cache/Multica/logs
+#                    (Linux). Token values are NEVER written to disk or stdout/stderr.
+#
+# Without --workspace/--token, this script falls back to the legacy
+# install-only path. After installation, run `multica setup` to configure your
+# environment manually.
 #
 set -euo pipefail
 
@@ -340,6 +352,100 @@ setup_server() {
 
 
 # ---------------------------------------------------------------------------
+# One-liner Computer install (RFC v6.1 §6.4)
+# ---------------------------------------------------------------------------
+
+# scrub_token removes any "mit_*" / "mdt_*" / "mul_*" token from a stream so
+# diagnostic logs never leak a live credential. Matches whitespace-delimited
+# token strings of the form prefix_<hex/base64-ish>. Conservative on purpose:
+# false positives become "[redacted]"; we'd rather mask one extra phrase than
+# leak a token.
+scrub_token() {
+  # POSIX-safe redaction:  prefix_<no whitespace>  →  prefix_<redacted>
+  sed -E \
+    -e 's/(mit_)[A-Za-z0-9._-]+/\1<redacted>/g' \
+    -e 's/(mdt_)[A-Za-z0-9._-]+/\1<redacted>/g' \
+    -e 's/(mul_)[A-Za-z0-9._-]+/\1<redacted>/g'
+}
+
+# diagnostics_dir returns the platform-appropriate log location for the
+# install diagnostic bundle. macOS follows the user-readable
+# ~/Library/Logs convention used by Console.app; Linux falls back to
+# XDG_CACHE_HOME so the bundle survives reboots without polluting $HOME.
+diagnostics_dir() {
+  case "$(uname -s)" in
+    Darwin) printf '%s/Library/Logs/Multica' "$HOME" ;;
+    *)      printf '%s/Multica/logs' "${XDG_CACHE_HOME:-$HOME/.cache}" ;;
+  esac
+}
+
+run_one_liner_install() {
+  local workspace_slug="$1"
+  local install_token="$2"
+  local server_url="$3"
+  local diagnose="$4"
+
+  # Diagnostic bundle: stdout/stderr are still streamed live; we additionally
+  # tee them to a redacted log file so users can attach it to a support
+  # request without exposing a token.
+  local diag_dir=""
+  local diag_log=""
+  if [ "$diagnose" = "true" ]; then
+    diag_dir=$(diagnostics_dir)
+    mkdir -p "$diag_dir"
+    chmod 0700 "$diag_dir" 2>/dev/null || true
+    # 8-char random hex; collision-resistant across same-second runs.
+    local dx
+    dx=$(openssl rand -hex 4 2>/dev/null || printf '%08x' "$$")
+    diag_log="$diag_dir/install-dx_$dx.log"
+    : > "$diag_log"
+    chmod 0600 "$diag_log" 2>/dev/null || true
+    # Redirect a copy of all subsequent stdout+stderr through scrub_token
+    # into the log file. Using a coprocess via process substitution keeps the
+    # original terminal output flowing live; only the file copy is scrubbed.
+    exec > >(tee >(scrub_token >>"$diag_log")) 2>&1
+    info "Diagnostic log: $diag_log (tokens are redacted)"
+  fi
+
+  printf "\n"
+  printf "${BOLD}  Multica — Add Computer${RESET}\n"
+  printf "  Workspace: ${BOLD}%s${RESET}\n" "$workspace_slug"
+  printf "\n"
+
+  detect_os
+  install_cli
+
+  if ! command_exists multica; then
+    fail "CLI installed but 'multica' not on PATH. Re-open your shell and re-run."
+  fi
+
+  info "Registering this computer with the workspace..."
+  local args=( "daemon" "start" "--install-token" "$install_token" )
+  if [ -n "$server_url" ]; then
+    args+=( "--server-url" "$server_url" )
+  fi
+
+  # We deliberately pass the token via argv to a trusted local binary the
+  # user just installed — same process boundary as `multica login --token`.
+  # The daemon CLI scrubs it from its own logs (see daemon resolveAuth);
+  # we never print it ourselves.
+  if ! multica "${args[@]}"; then
+    printf "\n"
+    fail "Failed to register this computer. The install token may have been used or expired.
+Generate a new one from Add Computer in the workspace UI and re-run this script."
+  fi
+
+  printf "\n"
+  printf "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
+  printf "${BOLD}${GREEN}  ✓ This computer is connected${RESET}\n"
+  printf "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
+  printf "\n"
+  printf "  Open the ${BOLD}Computers${RESET} page in the workspace to confirm it is online.\n"
+  printf "  Manage agent runtimes with: ${CYAN}multica computer list${RESET}\n"
+  printf "\n"
+}
+
+# ---------------------------------------------------------------------------
 # Main: Default mode (install / upgrade CLI only)
 # ---------------------------------------------------------------------------
 run_default() {
@@ -431,20 +537,59 @@ run_stop() {
 # ---------------------------------------------------------------------------
 main() {
   local mode="default"
+  local workspace_slug=""
+  local install_token=""
+  local cli_server_url=""
+  local diagnose="false"
+  local interactive_fallback="false"
 
   while [ $# -gt 0 ]; do
     case "$1" in
       --with-server) mode="with-server" ;;
       --local)       mode="with-server" ;;  # backwards compat alias
       --stop)        mode="stop" ;;
+      --workspace)
+        shift
+        workspace_slug="${1:-}"
+        ;;
+      --workspace=*) workspace_slug="${1#*=}" ;;
+      --token)
+        shift
+        install_token="${1:-}"
+        ;;
+      --token=*)     install_token="${1#*=}" ;;
+      --server-url)
+        shift
+        cli_server_url="${1:-}"
+        ;;
+      --server-url=*) cli_server_url="${1#*=}" ;;
+      --diagnose)    diagnose="true" ;;
+      --interactive) interactive_fallback="true" ;;
       --help|-h)
-        echo "Usage: install.sh [--with-server | --stop]"
-        echo ""
-        echo "  (default)       Install / upgrade the Multica CLI"
-        echo "  --with-server   Install CLI + provision a self-host server (Docker)"
-        echo "  --stop          Stop a self-hosted installation"
-        echo ""
-        echo "After installation, run 'multica setup' to configure your environment."
+        cat <<'USAGE'
+Usage: install.sh [options]
+
+Default (no options):
+  Install or upgrade the Multica CLI. Run `multica setup` afterwards to
+  authenticate and start the daemon manually.
+
+One-liner Computer install (RFC v6.1):
+  --workspace <slug>     Workspace slug the install token was minted for.
+  --token <mit_…>        One-time install token from Add Computer in the UI.
+  --server-url <url>     Override the server URL (default: Multica Cloud).
+  --diagnose             Write a redacted log bundle to ~/Library/Logs/Multica
+                         (macOS) or ~/.cache/Multica/logs (Linux). Token
+                         values are never written to stdout/stderr or the log.
+
+Self-host:
+  --with-server          Install CLI + provision a self-hosted server (Docker).
+  --stop                 Stop a self-hosted installation.
+
+Hidden:
+  --interactive          Skip the one-liner path and drop to the legacy
+                         three-step interactive install. Intended for
+                         operators recovering from a stale install token.
+USAGE
         exit 0
         ;;
       *) warn "Unknown option: $1" ;;
@@ -452,10 +597,28 @@ main() {
     shift
   done
 
+  # Either both --workspace and --token are present (one-liner Computer
+  # install), or neither (legacy install-only). Mixing the two is a config
+  # mistake — fail loudly so the user generates a fresh token.
+  if [ -n "$install_token" ] && [ -z "$workspace_slug" ]; then
+    fail "--token requires --workspace; pass --workspace <slug> as well, or omit both for the legacy install-only flow"
+  fi
+  if [ -n "$workspace_slug" ] && [ -z "$install_token" ]; then
+    fail "--workspace requires --token; pass --token <mit_…> as well, or omit both for the legacy install-only flow"
+  fi
+  if [ -n "$install_token" ] && [ "${install_token#mit_}" = "$install_token" ]; then
+    fail "--token must be a one-time install token (starts with 'mit_'). Generate one from Add Computer in the workspace UI."
+  fi
+
+  if [ -n "$install_token" ] && [ "$interactive_fallback" != "true" ]; then
+    mode="one-liner"
+  fi
+
   case "$mode" in
     default)     run_default ;;
     with-server) run_with_server ;;
     stop)        run_stop ;;
+    one-liner)   run_one_liner_install "$workspace_slug" "$install_token" "$cli_server_url" "$diagnose" ;;
   esac
 }
 
