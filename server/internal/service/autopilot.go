@@ -445,6 +445,11 @@ func (s *AutopilotService) handleDispatchSkip(ctx context.Context, ap db.Autopil
 		"run_id", util.UUIDToString(run.ID),
 		"reason", skipErr.reason,
 	)
+	// Bump last_run_at on parity with recordSkippedRun (pre-flight skip) and
+	// the success path: from the scheduler's / UI's point of view we did
+	// evaluate the trigger this tick, even though the post-admission gate
+	// caught a late readiness regression.
+	s.Queries.UpdateAutopilotLastRunAt(ctx, ap.ID)
 	s.publishRunDone(util.UUIDToString(ap.WorkspaceID), updated, "skipped")
 	return run
 }
