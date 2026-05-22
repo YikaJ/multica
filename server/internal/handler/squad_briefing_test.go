@@ -13,6 +13,22 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+func TestSquadOperatingProtocolExplainsTodoChildIssueTrigger(t *testing.T) {
+	compact := strings.Join(strings.Fields(squadOperatingProtocol), " ")
+	for _, want := range []string{
+		"Delegate exactly once.",
+		"A child issue created with status `todo` starts that agent automatically",
+		"do NOT also @mention the same agent in the parent issue",
+		"Use status `backlog` for child issues that should wait until promoted to `todo`",
+		"EVERY comment-based delegation MUST use the full mention markdown syntax",
+		"that assignment already triggers the agent",
+	} {
+		if !strings.Contains(compact, want) {
+			t.Errorf("expected squad operating protocol to contain %q\n--- protocol ---\n%s", want, squadOperatingProtocol)
+		}
+	}
+}
+
 // seedSquadForBriefing creates a squad with the seeded test agent as
 // leader. Returns the loaded db.Squad and a cleanup-registered ID.
 func seedSquadForBriefing(t *testing.T, leaderID string, name, instructions string) db.Squad {

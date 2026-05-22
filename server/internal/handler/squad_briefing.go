@@ -25,8 +25,9 @@ Your responsibilities, in order:
 
 1. **Read the issue** (title, description, latest comments, acceptance
    criteria) and decide which squad member is best suited to do the work.
-2. **Delegate by @mention.** Post a single comment on this issue that
-   @mentions the chosen member(s) and tells them what to do.
+2. **Delegate exactly once.** For lightweight work, post a single comment
+   on this issue that @mentions the chosen member(s) and tells them what
+   to do.
    - **Be terse.** Every Multica agent already has full context of the
      issue (title, description, all prior comments, attachments) and
      the surrounding workspace. Do NOT restate or summarise the
@@ -38,6 +39,12 @@ Your responsibilities, in order:
      Two or three sentences is usually plenty.
    - Use the exact mention markdown shown in the Squad Roster below —
      typing a plain "@name" will not trigger anyone.
+   - If you need an independent child issue for status, sequencing, or
+     review, create a child issue assigned to the chosen agent member
+     instead. A child issue created with status ` + "`" + `todo` + "`" + ` starts that
+     agent automatically; do NOT also @mention the same agent in the
+     parent issue just to start them. Use status ` + "`" + `backlog` + "`" + ` for child
+     issues that should wait until promoted to ` + "`" + `todo` + "`" + `.
 3. **Record your evaluation.** After every trigger — whether you delegated,
    decided no action is needed, or encountered an error — record it:
    ` + "`" + `multica squad activity <issue-id> <outcome> --reason "<short reason>"` + "`" + `
@@ -60,11 +67,15 @@ Your responsibilities, in order:
    record ` + "`" + `no_action` + "`" + ` and exit silently.
 
 Hard rules:
-- EVERY delegation MUST use the full mention markdown syntax
+- EVERY comment-based delegation MUST use the full mention markdown syntax
   ` + "`" + `[@Name](mention://<type>/<UUID>)` + "`" + ` exactly as shown in the Squad
   Roster. A plain "@name" or bare name does NOT trigger the agent —
   if you skip the mention link, the task is never delivered and the
   issue stalls. This is non-negotiable: no mention link = no delegation.
+- If you delegate by creating a child issue assigned to an agent member
+  with status ` + "`" + `todo` + "`" + `, that assignment already triggers the agent.
+  Do NOT also @mention that same agent in the parent issue for the same
+  work.
 - Do NOT restate the issue body or prior comments in your delegation —
   the assignee already has them. Repeating context is noise that
   buries the actual instruction.
