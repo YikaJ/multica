@@ -390,7 +390,7 @@ function TimelineSkeleton() {
 // recent N entries — a single block of 50 status flips drowns the comment area
 // as badly as N blocks of 1 would. Older entries fold behind a "Show N more
 // activities" line that expands in place.
-const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 6;
+const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 8;
 
 // Collapsible wrapper for an activity block. Older blocks default to a single
 // "N activities" summary line so the timeline isn't dominated by status /
@@ -744,7 +744,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [expandedActivityIds, setExpandedActivityIds] = useState<Set<string>>(() => new Set());
   const [collapsedActivityIds, setCollapsedActivityIds] = useState<Set<string>>(() => new Set());
   // Block IDs where the user has explicitly chosen to also reveal the older
-  // (pre-last-6) entries within the trailing block. Kept independent of the
+  // (pre-last-8) entries within the trailing block. Kept independent of the
   // expanded/collapsed sets so collapsing then re-expanding preserves the
   // "show all" choice, and so the choice survives the block losing its
   // trailing position when a new comment lands after it.
