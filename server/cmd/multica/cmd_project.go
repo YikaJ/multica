@@ -126,9 +126,12 @@ func init() {
 	// project resource add — generic shape: any --type with a JSON --ref payload
 	// works without further CLI changes. github_repo is supported via the
 	// dedicated --url / --default-branch-hint shortcuts as a convenience.
-	projectResourceAddCmd.Flags().String("type", "github_repo", "Resource type (e.g. github_repo, notion_page — see docs)")
+	projectResourceAddCmd.Flags().String("type", "github_repo", "Resource type (e.g. github_repo, local_directory — see docs)")
 	projectResourceAddCmd.Flags().String("url", "", "Shortcut: the repo URL (only used when --type github_repo)")
 	projectResourceAddCmd.Flags().String("default-branch-hint", "", "Shortcut: optional default branch hint (only used when --type github_repo)")
+	projectResourceAddCmd.Flags().String("local-path", "", "Shortcut: absolute path to the working directory (only used when --type local_directory)")
+	projectResourceAddCmd.Flags().String("daemon-id", "", "Shortcut: id of the daemon that owns the local path (only used when --type local_directory)")
+	projectResourceAddCmd.Flags().String("ref-label", "", "Shortcut: optional label embedded in resource_ref (only used when --type local_directory)")
 	projectResourceAddCmd.Flags().String("ref", "", "Generic JSON resource_ref payload — overrides the per-type shortcuts when set")
 	projectResourceAddCmd.Flags().String("label", "", "Optional human-readable label")
 	projectResourceAddCmd.Flags().String("output", "json", "Output format: table or json")
@@ -544,6 +547,19 @@ func runProjectResourceAdd(cmd *cobra.Command, args []string) error {
 				ref["default_branch_hint"] = strings.TrimSpace(hint)
 			}
 			body["resource_ref"] = ref
+		case "local_directory":
+			pathVal, _ := cmd.Flags().GetString("local-path")
+			pathVal = strings.TrimSpace(pathVal)
+			daemonVal, _ := cmd.Flags().GetString("daemon-id")
+			daemonVal = strings.TrimSpace(daemonVal)
+			if pathVal == "" || daemonVal == "" {
+				return fmt.Errorf("local_directory requires --local-path and --daemon-id (or pass a JSON payload via --ref)")
+			}
+			ref := map[string]any{"local_path": pathVal, "daemon_id": daemonVal}
+			if refLabel, _ := cmd.Flags().GetString("ref-label"); strings.TrimSpace(refLabel) != "" {
+				ref["label"] = strings.TrimSpace(refLabel)
+			}
+			body["resource_ref"] = ref
 		default:
 			return fmt.Errorf("type %q has no built-in CLI shortcut; pass the payload via --ref '<json>'", resourceType)
 		}
@@ -612,7 +628,8 @@ func runProjectResourceRemove(cmd *cobra.Command, args []string) error {
 }
 
 // summarizeResourceRef extracts the most useful single string from a
-// resource_ref object — for github_repo this is the URL.
+// resource_ref object — for github_repo this is the URL; for
+// local_directory it is the local path.
 func summarizeResourceRef(raw any) string {
 	m, ok := raw.(map[string]any)
 	if !ok {
@@ -620,6 +637,9 @@ func summarizeResourceRef(raw any) string {
 	}
 	if u, ok := m["url"].(string); ok && u != "" {
 		return u
+	}
+	if p, ok := m["local_path"].(string); ok && p != "" {
+		return p
 	}
 	if data, err := json.Marshal(m); err == nil {
 		return string(data)

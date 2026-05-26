@@ -65,14 +65,16 @@ func validateAndNormalizeResourceRef(resourceType string, ref json.RawMessage) (
 	switch resourceType {
 	case "github_repo":
 		return validateGithubRepoRef(ref)
+	case "local_directory":
+		return validateLocalDirectoryRef(ref)
 	default:
 		return nil, fmt.Errorf("unknown resource_type %q", resourceType)
 	}
 }
 
 type githubRepoRef struct {
-	URL                string `json:"url"`
-	DefaultBranchHint  string `json:"default_branch_hint,omitempty"`
+	URL               string `json:"url"`
+	DefaultBranchHint string `json:"default_branch_hint,omitempty"`
 }
 
 func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
@@ -93,6 +95,68 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// localDirectoryRef is the JSONB shape stored for resource_type=local_directory.
+// It pins a project to an existing directory on a specific user machine, so
+// agent tasks run in-place rather than in an isolated git worktree. The
+// daemon_id scopes the path to one daemon registration — the same string path
+// on a different machine is a different resource. The optional label is a
+// human-readable hint used by the UI; the row-level project_resource.label
+// column remains the generic column for any resource type.
+type localDirectoryRef struct {
+	LocalPath string `json:"local_path"`
+	DaemonID  string `json:"daemon_id"`
+	Label     string `json:"label,omitempty"`
+}
+
+func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
+	var payload localDirectoryRef
+	if err := json.Unmarshal(ref, &payload); err != nil {
+		return nil, fmt.Errorf("invalid local_directory payload: %w", err)
+	}
+	payload.LocalPath = strings.TrimSpace(payload.LocalPath)
+	if payload.LocalPath == "" {
+		return nil, errors.New("local_directory: local_path is required")
+	}
+	if !isAbsoluteLocalPath(payload.LocalPath) {
+		return nil, errors.New("local_directory: local_path must be an absolute path")
+	}
+	payload.DaemonID = strings.TrimSpace(payload.DaemonID)
+	if payload.DaemonID == "" {
+		return nil, errors.New("local_directory: daemon_id is required")
+	}
+	payload.Label = strings.TrimSpace(payload.Label)
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// isAbsoluteLocalPath checks the path looks absolute on either POSIX or
+// Windows daemons. The server can't know which OS the daemon runs on, so we
+// accept the union: a leading "/" (POSIX), a UNC prefix "\\", or a drive
+// letter like "C:\" or "C:/". The daemon still verifies existence at run
+// time — this is a typo guard, not a filesystem check.
+func isAbsoluteLocalPath(s string) bool {
+	if s == "" {
+		return false
+	}
+	if s[0] == '/' {
+		return true
+	}
+	if strings.HasPrefix(s, `\\`) {
+		return true
+	}
+	if len(s) >= 3 && isDriveLetter(s[0]) && s[1] == ':' && (s[2] == '\\' || s[2] == '/') {
+		return true
+	}
+	return false
+}
+
+func isDriveLetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 // isValidGitRepoURL accepts the three forms a user can paste from GitHub's

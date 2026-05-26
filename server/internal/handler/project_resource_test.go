@@ -215,9 +215,9 @@ func TestIsValidGitRepoURL(t *testing.T) {
 		"ftp://example.com/repo",        // unsupported scheme
 		"file:///tmp/repo",              // unsupported scheme
 		"some random text with spaces",
-		"github.com:org/repo@branch",    // '@' after ':' belongs to the path, not user
-		"foo:bar@baz",                   // '@' after ':' with no scheme
-		":foo/bar",                      // leading ':' with no host
+		"github.com:org/repo@branch", // '@' after ':' belongs to the path, not user
+		"foo:bar@baz",                // '@' after ':' with no scheme
+		":foo/bar",                   // leading ':' with no host
 	}
 	for _, s := range good {
 		if !isValidGitRepoURL(s) {
@@ -227,6 +227,227 @@ func TestIsValidGitRepoURL(t *testing.T) {
 	for _, s := range bad {
 		if isValidGitRepoURL(s) {
 			t.Errorf("isValidGitRepoURL(%q) = true, want false", s)
+		}
+	}
+}
+
+// TestProjectResourceLocalDirectoryLifecycle covers the full CRUD path for the
+// local_directory resource type added in MUL-2662. Unlike github_repo, the
+// ref schema requires local_path + daemon_id and forbids any path that isn't
+// absolute. Two project-scoped resources pointing at the same daemon_id /
+// local_path on different projects must be allowed — Bohan explicitly chose
+// not to add a UNIQUE(daemon_id, local_path) constraint.
+func TestProjectResourceLocalDirectoryLifecycle(t *testing.T) {
+	createProject := func(title string) ProjectResponse {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+			"title": title,
+		})
+		testHandler.CreateProject(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateProject(%s): %d %s", title, w.Code, w.Body.String())
+		}
+		var p ProjectResponse
+		if err := json.NewDecoder(w.Body).Decode(&p); err != nil {
+			t.Fatalf("decode CreateProject: %v", err)
+		}
+		return p
+	}
+	deleteProject := func(id string) {
+		r := newRequest("DELETE", "/api/projects/"+id, nil)
+		r = withURLParam(r, "id", id)
+		testHandler.DeleteProject(httptest.NewRecorder(), r)
+	}
+
+	projectA := createProject("Local directory project A")
+	defer deleteProject(projectA.ID)
+	projectB := createProject("Local directory project B")
+	defer deleteProject(projectB.ID)
+
+	const (
+		daemonID  = "daemon-aaaa-bbbb-cccc"
+		localPath = "/Users/foo/work/my-game"
+	)
+
+	// Happy path: attach local_directory resource with label.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects/"+projectA.ID+"/resources", map[string]any{
+		"resource_type": "local_directory",
+		"resource_ref": map[string]any{
+			"local_path": localPath,
+			"daemon_id":  daemonID,
+			"label":      "Game Repo",
+		},
+	})
+	req = withURLParam(req, "id", projectA.ID)
+	testHandler.CreateProjectResource(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProjectResource: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created ProjectResourceResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode CreateProjectResource: %v", err)
+	}
+	if created.ResourceType != "local_directory" {
+		t.Errorf("ResourceType = %q, want local_directory", created.ResourceType)
+	}
+	var ref struct {
+		LocalPath string `json:"local_path"`
+		DaemonID  string `json:"daemon_id"`
+		Label     string `json:"label"`
+	}
+	if err := json.Unmarshal(created.ResourceRef, &ref); err != nil {
+		t.Fatalf("decode resource_ref: %v", err)
+	}
+	if ref.LocalPath != localPath || ref.DaemonID != daemonID || ref.Label != "Game Repo" {
+		t.Errorf("ref = %+v, want {%q, %q, Game Repo}", ref, localPath, daemonID)
+	}
+
+	// Listing must include the new resource.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/projects/"+projectA.ID+"/resources", nil)
+	req = withURLParam(req, "id", projectA.ID)
+	testHandler.ListProjectResources(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListProjectResources: %d %s", w.Code, w.Body.String())
+	}
+	var listResp struct {
+		Resources []ProjectResourceResponse `json:"resources"`
+		Total     int                       `json:"total"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&listResp); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if listResp.Total != 1 || listResp.Resources[0].ID != created.ID {
+		t.Fatalf("list mismatch: %+v", listResp)
+	}
+
+	// Same (daemon_id, local_path) on a different project must succeed —
+	// the design explicitly allows the same directory to back multiple
+	// projects, contrast with github_repo's per-project UNIQUE check.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/projects/"+projectB.ID+"/resources", map[string]any{
+		"resource_type": "local_directory",
+		"resource_ref": map[string]any{
+			"local_path": localPath,
+			"daemon_id":  daemonID,
+		},
+	})
+	req = withURLParam(req, "id", projectB.ID)
+	testHandler.CreateProjectResource(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("same path on project B: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Duplicate attach on the same project must still conflict — the
+	// UNIQUE(project_id, resource_type, resource_ref) row constraint
+	// remains in effect.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/projects/"+projectA.ID+"/resources", map[string]any{
+		"resource_type": "local_directory",
+		"resource_ref": map[string]any{
+			"local_path": localPath,
+			"daemon_id":  daemonID,
+			"label":      "Game Repo",
+		},
+	})
+	req = withURLParam(req, "id", projectA.ID)
+	testHandler.CreateProjectResource(w, req)
+	if w.Code != http.StatusConflict {
+		t.Errorf("duplicate on same project: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Delete the resource on project A.
+	w = httptest.NewRecorder()
+	req = newRequest("DELETE", "/api/projects/"+projectA.ID+"/resources/"+created.ID, nil)
+	req = withURLParams(req, "id", projectA.ID, "resourceId", created.ID)
+	testHandler.DeleteProjectResource(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteProjectResource: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestProjectResourceLocalDirectoryValidation pins the schema rejection
+// surface for local_directory: missing path, missing daemon, relative paths,
+// and malformed JSON must all return 400. These are the only client-visible
+// errors agents will hit, so freezing them as tests prevents accidental
+// loosening when someone touches the validator.
+func TestProjectResourceLocalDirectoryValidation(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Local directory validation",
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProject: %d %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode CreateProject: %v", err)
+	}
+	defer func() {
+		r := newRequest("DELETE", "/api/projects/"+project.ID, nil)
+		r = withURLParam(r, "id", project.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), r)
+	}()
+
+	cases := []struct {
+		name string
+		ref  any
+	}{
+		{"missing local_path", map[string]any{"daemon_id": "d1"}},
+		{"blank local_path", map[string]any{"local_path": "   ", "daemon_id": "d1"}},
+		{"relative local_path", map[string]any{"local_path": "work/my-game", "daemon_id": "d1"}},
+		{"home-shorthand path", map[string]any{"local_path": "~/work/my-game", "daemon_id": "d1"}},
+		{"missing daemon_id", map[string]any{"local_path": "/Users/foo/work"}},
+		{"blank daemon_id", map[string]any{"local_path": "/Users/foo/work", "daemon_id": ""}},
+		{"wrong type in payload", map[string]any{"local_path": 42, "daemon_id": "d1"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := newRequest("POST", "/api/projects/"+project.ID+"/resources", map[string]any{
+				"resource_type": "local_directory",
+				"resource_ref":  tc.ref,
+			})
+			req = withURLParam(req, "id", project.ID)
+			testHandler.CreateProjectResource(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestIsAbsoluteLocalPath(t *testing.T) {
+	good := []string{
+		"/Users/foo/work",
+		"/",
+		"/a",
+		`C:\Users\foo`,
+		`C:/Users/foo`,
+		`d:\code\repo`,
+		`\\server\share\path`,
+	}
+	bad := []string{
+		"",
+		"work/my-game",
+		"./relative",
+		"../relative",
+		"~/work",
+		"C:relative",
+		"C:",
+		`\foo`,
+		"file:///tmp",
+	}
+	for _, s := range good {
+		if !isAbsoluteLocalPath(s) {
+			t.Errorf("isAbsoluteLocalPath(%q) = false, want true", s)
+		}
+	}
+	for _, s := range bad {
+		if isAbsoluteLocalPath(s) {
+			t.Errorf("isAbsoluteLocalPath(%q) = true, want false", s)
 		}
 	}
 }
@@ -437,4 +658,3 @@ func TestCreateProjectRollsBackOnInvalidResource(t *testing.T) {
 		}
 	}
 }
-
