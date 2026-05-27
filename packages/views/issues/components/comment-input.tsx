@@ -77,11 +77,11 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
       .filter((a) => content.includes(a.url))
       .map((a) => a.id);
     setSubmitting(true);
+    editorRef.current?.clearContent();
+    setIsEmpty(true);
+    setPendingAttachments([]);
     try {
       await onSubmit(content, activeIds.length > 0 ? activeIds : undefined);
-      editorRef.current?.clearContent();
-      setIsEmpty(true);
-      setPendingAttachments([]);
       clearDraft(draftKey);
     } finally {
       setSubmitting(false);

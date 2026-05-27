@@ -96,11 +96,11 @@ function ReplyInput({
       .filter((a) => content.includes(a.url))
       .map((a) => a.id);
     setSubmitting(true);
+    editorRef.current?.clearContent();
+    setIsEmpty(true);
+    setPendingAttachments([]);
     try {
       await onSubmit(content, activeIds.length > 0 ? activeIds : undefined);
-      editorRef.current?.clearContent();
-      setIsEmpty(true);
-      setPendingAttachments([]);
       if (draftKey) clearDraft(draftKey);
     } finally {
       setSubmitting(false);

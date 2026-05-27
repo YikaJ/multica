@@ -265,7 +265,6 @@ function CommentRow({
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
   const canDeleteEntry = isOwn || canModerate;
-  const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const startEdit = () => {
@@ -325,7 +324,7 @@ function CommentRow({
   );
 
   return (
-    <div className={`py-3${isTemp ? " opacity-60" : ""}`}>
+    <div className="py-3">
       <div className="flex items-center gap-2.5">
         <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
         <span className="cursor-pointer text-sm font-medium">
@@ -344,8 +343,7 @@ function CommentRow({
           </TooltipContent>
         </Tooltip>
 
-        {!isTemp && (
-          <div className="ml-auto flex items-center gap-0.5">
+        <div className="ml-auto flex items-center gap-0.5">
             <QuickEmojiPicker
               onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
               align="end"
@@ -392,7 +390,6 @@ function CommentRow({
             onConfirm={() => onDelete(entry.id)}
           />
           </div>
-        )}
       </div>
 
       {editing ? (
@@ -450,16 +447,14 @@ function CommentRow({
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
-          {!isTemp && (
-            <ReactionBar
-              reactions={reactions}
-              currentUserId={currentUserId}
-              onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
-              getActorName={getActorName}
-              hideAddButton={!isLongContent}
-              className="mt-1.5 pl-8"
-            />
-          )}
+          <ReactionBar
+            reactions={reactions}
+            currentUserId={currentUserId}
+            onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
+            getActorName={getActorName}
+            hideAddButton={!isLongContent}
+            className="mt-1.5 pl-8"
+          />
         </>
       )}
     </div>
@@ -527,7 +522,6 @@ function CommentCardImpl({
   // own their own outputs.
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
   const canDeleteEntry = isOwn || canModerate;
-  const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const startEdit = () => {
@@ -596,7 +590,7 @@ function CommentCardImpl({
   const isHighlighted = highlightedCommentId === entry.id;
 
   return (
-    <Card className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isTemp && "opacity-60", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}>
+    <Card className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}>
       {onCollapseResolved && (
         <button
           type="button"
@@ -646,7 +640,7 @@ function CommentCardImpl({
               </span>
             )}
 
-            {open && !isTemp && (
+            {open && (
               <div className="ml-auto flex items-center gap-0.5">
                 <QuickEmojiPicker
                   onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
@@ -776,16 +770,14 @@ function CommentCardImpl({
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
-                {!isTemp && (
-                  <ReactionBar
-                    reactions={reactions}
-                    currentUserId={currentUserId}
-                    onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
-                    getActorName={getActorName}
-                    hideAddButton={!isLongContent}
-                    className="mt-1.5 pl-10"
-                  />
-                )}
+                <ReactionBar
+                  reactions={reactions}
+                  currentUserId={currentUserId}
+                  onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
+                  getActorName={getActorName}
+                  hideAddButton={!isLongContent}
+                  className="mt-1.5 pl-10"
+                />
               </>
             )}
           </div>
