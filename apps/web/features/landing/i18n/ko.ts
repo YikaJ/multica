@@ -270,7 +270,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           version: "0.3.13",
           date: "2026-06-01",
-          title: "스킬 명령, 런타임 필터, 더 매끄러운 이슈 협업",
+          title: "Skill Command 업데이트",
           changes: [],
           features: [
             "CLI에서 스킬을 검색하고 이슈에 연결된 pull request를 확인할 수 있어 릴리스 확인과 자동화 점검이 더 쉬워졌습니다.",

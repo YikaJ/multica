@@ -295,7 +295,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.13",
         date: "2026-06-01",
-        title: "Skill Commands, Runtime Filters, and Smoother Issue Work",
+        title: "Skill Command Updates",
         changes: [],
         features: [
           "The CLI can now search skills and list pull requests linked to an Issue, making release checks and automation audits easier from the terminal",

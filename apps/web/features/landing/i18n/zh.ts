@@ -295,10 +295,10 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.13",
         date: "2026-06-01",
-        title: "技能命令、运行环境筛选与更顺畅的 Issue 协作",
+        title: "Skill Command 更新",
         changes: [],
         features: [
-          "命令行现在可以搜索技能，也可以列出某个 Issue 关联的合并请求，发布检查和自动化排查更方便",
+          "命令行现在可以搜索 Skill，也可以列出某个 Issue 关联的合并请求，发布检查和自动化排查更方便",
           "团队可以直接在命令行调整小队成员角色，不用进入应用界面",
           "智能体列表可以按运行机器筛选，更快找到绑定到某台设备或本机运行服务的智能体",
           "邮件发送服务现在支持安全的 465 端口连接",
@@ -307,7 +307,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         improvements: [
           "移动端 Issue 顶部操作更清晰，小屏幕上也更容易点击",
           "聊天历史里的运行状态和操作按钮更稳定，减少误点和状态混乱",
-          "重复导入同一个技能时，会给出清楚结果，不再打断当前流程",
+          "重复导入同一个 Skill 时，会给出清楚结果，不再打断当前流程",
         ],
         fixes: [
           "评论回复会保留在用户实际回复的那条评论下面",
