@@ -42,13 +42,14 @@ func TestBuildCommentReplyInstructionsCodexLinux(t *testing.T) {
 	}
 }
 
-// TestBuildCommentReplyInstructionsNonCodexLinux pins that every non-Codex
-// provider on Linux/macOS gets the lightweight pre-#1795 inline template.
-// The "MUST stdin" mandate was originally a Codex-specific fix that
-// #1795 / #1851 accidentally spread to every provider, breaking Windows
-// non-ASCII for all of them (#2198 / #2236 / #2376). Non-Codex providers
-// handle inline escaping correctly and the CLI server-decodes `\n` etc.,
-// so the inline template works on every non-Windows platform.
+// TestBuildCommentReplyInstructionsNonCodexLinux pins the MUL-2904 regression:
+// EVERY provider on Linux/macOS — not just Codex — gets the quoted-HEREDOC
+// `--content-stdin` template and is steered away from inline `--content "..."`.
+// The duplicate-comment loop on OKK-497 happened because an agent inlined a
+// backtick-wrapped table name into `--content`; the shell ran it as a command
+// substitution, silently deleted it, the stored comment no longer matched the
+// model's intent, and the model retried forever. The corruption is shell-driven,
+// so the guardrail cannot be scoped to one provider.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
@@ -66,7 +67,8 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 				got := BuildCommentReplyInstructions(provider, issueID, triggerID)
 
 				for _, want := range []string{
-					"multica issue comment add " + issueID + " --parent " + triggerID + " --content \"...\"",
+					"cat <<'COMMENT' | multica issue comment add " + issueID + " --parent " + triggerID + " --content-stdin",
+					"Always use `--content-stdin`",
 					"do NOT reuse --parent values from previous turns",
 					"If you decide to reply",
 				} {
@@ -75,18 +77,11 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 					}
 				}
 
-				// Non-Codex / non-Windows providers must NOT receive the
-				// Codex-specific "MUST stdin" mandate or its HEREDOC
-				// template — that was the over-spread of #1795 / #1851.
-				for _, banned := range []string{
-					"Always use `--content-stdin`",
-					"<<'COMMENT'",
-					"--parent " + triggerID + " --content-stdin",
-					"--parent " + triggerID + " --content-file",
-				} {
-					if strings.Contains(got, banned) {
-						t.Errorf("%s reply instructions still steers at codex template: %q\n---\n%s", name, banned, got)
-					}
+				// The regression itself: agent-authored comments must never be
+				// steered at inline `--content "..."`, which the shell can
+				// rewrite (backticks / `$()` / quotes) before the CLI sees it.
+				if strings.Contains(got, "--content \"...\"") {
+					t.Errorf("%s reply instructions still offers the inline --content form\n---\n%s", name, got)
 				}
 			})
 		}
