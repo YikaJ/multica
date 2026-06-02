@@ -267,3 +267,58 @@ func TestTriggerAutopilot_SquadPrivateLeader_PlainMemberCreator_Blocked(t *testi
 		t.Fatalf("run status = %q; want skipped/failed since creator is plain member", run.Status)
 	}
 }
+
+// TestTriggerAutopilot_RunOnly_SquadPrivateLeader_PlainMemberCreator_Blocked
+// mirrors the create_issue dispatch test above but exercises the run_only
+// dispatch path (dispatchRunOnly), ensuring both dispatch branches gate
+// private-leader access.
+func TestTriggerAutopilot_RunOnly_SquadPrivateLeader_PlainMemberCreator_Blocked(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID, _, memberID := privateAgentTestFixture(t)
+
+	var squadID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		VALUES ($1, 'AP RunOnly Private Leader Blocked', '', $2, $3)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&squadID); err != nil {
+		t.Fatalf("create squad: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+	})
+
+	// Legacy autopilot: run_only mode, plain member creator, private-leader squad.
+	var apID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot (workspace_id, title, assignee_type, assignee_id,
+		                       execution_mode, created_by_type, created_by_id, status)
+		VALUES ($1, 'legacy run_only illegal ap', 'squad', $2, 'run_only', 'member', $3, 'active')
+		RETURNING id
+	`, testWorkspaceID, squadID, memberID).Scan(&apID); err != nil {
+		t.Fatalf("create autopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM autopilot_run WHERE autopilot_id = $1`, apID)
+		testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, apID)
+	})
+
+	w := httptest.NewRecorder()
+	r := newRequest("POST", "/api/autopilots/"+apID+"/trigger?workspace_id="+testWorkspaceID, nil)
+	r = withURLParam(r, "id", apID)
+	testHandler.TriggerAutopilot(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("TriggerAutopilot: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var run AutopilotRunResponse
+	if err := json.NewDecoder(w.Body).Decode(&run); err != nil {
+		t.Fatalf("decode run: %v", err)
+	}
+	if run.Status == "running" {
+		t.Fatalf("run status = %q; want skipped/failed since creator is plain member and leader is private", run.Status)
+	}
+}
