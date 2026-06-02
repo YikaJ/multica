@@ -47,6 +47,19 @@ describe("installRendererRecoveryHandlers", () => {
     expect(fixture.reload).toHaveBeenCalledTimes(2);
   });
 
+  it("does not prompt when the renderer exits cleanly", async () => {
+    const fixture = makeWindow();
+    const showReloadPrompt = vi.fn(async () => "reload" as const);
+
+    installRendererRecoveryHandlers(fixture.window, { isDev: false, showReloadPrompt });
+
+    fixture.webContentsHandlers.get("render-process-gone")?.({}, { reason: "clean-exit" });
+    await Promise.resolve();
+
+    expect(showReloadPrompt).not.toHaveBeenCalled();
+    expect(fixture.reload).not.toHaveBeenCalled();
+  });
+
   it("cancels an unresponsive prompt when the window becomes responsive again", async () => {
     vi.useFakeTimers();
     const fixture = makeWindow();

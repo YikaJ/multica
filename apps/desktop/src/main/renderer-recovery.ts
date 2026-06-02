@@ -42,6 +42,7 @@ export function installRendererRecoveryHandlers(
 
   window.webContents.on("render-process-gone", (_event, details) => {
     if (isDev) log("process-gone", JSON.stringify(details));
+    if (!isRecoverableRendererExit(details)) return;
     maybePromptReload({ kind: "render-process-gone", context: { details } });
   });
 
@@ -91,6 +92,18 @@ export function createElectronReloadPrompt(
     });
     return result.response === 0 ? "reload" : "dismiss";
   };
+}
+
+function isRecoverableRendererExit(details: unknown) {
+  if (!details || typeof details !== "object") return false;
+  const reason = (details as { reason?: unknown }).reason;
+  return (
+    reason === "crashed" ||
+    reason === "oom" ||
+    reason === "abnormal-exit" ||
+    reason === "launch-failed" ||
+    reason === "integrity-failure"
+  );
 }
 
 function rendererRecoveryMessage(kind: ReloadPromptPayload["kind"]) {
