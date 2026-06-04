@@ -19,7 +19,11 @@ import { homedir, hostname } from "os";
 import type { DaemonStatus, DaemonPrefs } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
-import { classifyAuthProbe, type AuthProbeResult } from "./daemon-auth-probe";
+import {
+  classifyAuthProbe,
+  isAuthStatusError,
+  type AuthProbeResult,
+} from "./daemon-auth-probe";
 
 const DEFAULT_HEALTH_PORT = 19514;
 const POLL_INTERVAL_MS = 5_000;
@@ -588,7 +592,13 @@ async function mintPat(jwt: string): Promise<string> {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`mint PAT failed: ${res.status} ${res.statusText} ${body}`);
+    // Attach the status so callers can tell a genuine auth rejection (401 — the
+    // session token is dead) apart from a transient failure (5xx, etc.) without
+    // string-matching the message.
+    throw Object.assign(
+      new Error(`mint PAT failed: ${res.status} ${res.statusText} ${body}`),
+      { status: res.status },
+    );
   }
   const data = (await res.json()) as { token?: unknown };
   if (typeof data.token !== "string" || !data.token.startsWith("mul_")) {
@@ -691,6 +701,52 @@ async function clearToken(): Promise<void> {
   // Always drop the sidecar so a subsequent syncToken from any user is
   // treated as a fresh mint, not a reuse of a stale cached PAT.
   await removeProfileUserId(active.name);
+}
+
+// Result of a user-initiated daemon re-authentication. The distinction matters:
+// only `session_invalid` justifies signing the user out of the whole app; a
+// `transient` failure must keep them logged in so they can retry.
+export type ReauthResult =
+  | { ok: true }
+  | { ok: false; reason: "session_invalid" }
+  | { ok: false; reason: "transient"; message: string };
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Recover the local daemon from the "auth_expired" state. Drops the stale
+ * cached PAT, mints a fresh one from the current session token, and restarts
+ * the daemon so it loads the new credential.
+ *
+ * Failures are classified rather than collapsed: a 401 from the mint means the
+ * session token itself is dead (`session_invalid` → the renderer drives a full
+ * re-login); anything else — mint 5xx, a network blip, a config write error, a
+ * restart hiccup — is `transient`, leaving the user signed in so they can retry.
+ * This mirrors the conservative classification the startup probe already uses.
+ */
+async function reauthenticate(
+  token: string,
+  userId: string,
+): Promise<ReauthResult> {
+  try {
+    await clearToken();
+    // syncToken mints a fresh PAT because clearToken just removed any cache.
+    await syncToken(token, userId);
+  } catch (err) {
+    if (isAuthStatusError(err)) return { ok: false, reason: "session_invalid" };
+    return { ok: false, reason: "transient", message: errorMessage(err) };
+  }
+  const restart = await restartDaemon();
+  if (!restart.success) {
+    return {
+      ok: false,
+      reason: "transient",
+      message: restart.error ?? "failed to restart daemon",
+    };
+  }
+  return { ok: true };
 }
 
 async function withGuard<T>(fn: () => Promise<T>): Promise<T | { success: false; error: string }> {
@@ -954,6 +1010,10 @@ export function setupDaemonManager(
     (_event, token: string, userId: string) => syncToken(token, userId),
   );
   ipcMain.handle("daemon:clear-token", () => clearToken());
+  ipcMain.handle(
+    "daemon:reauthenticate",
+    (_event, token: string, userId: string) => reauthenticate(token, userId),
+  );
   ipcMain.handle("daemon:is-cli-installed", async () => {
     const bin = await resolveCliBinary();
     return bin !== null;

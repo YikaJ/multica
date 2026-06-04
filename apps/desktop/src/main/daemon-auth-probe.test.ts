@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyAuthProbe } from "./daemon-auth-probe";
+import { classifyAuthProbe, isAuthStatusError } from "./daemon-auth-probe";
 
 describe("classifyAuthProbe", () => {
   it("treats a 401 as expired login", () => {
@@ -30,5 +30,27 @@ describe("classifyAuthProbe", () => {
 
   it("is inconclusive when nothing is known", () => {
     expect(classifyAuthProbe({})).toBe("unknown");
+  });
+});
+
+describe("isAuthStatusError", () => {
+  it("is true only for a 401-tagged error (session token is dead)", () => {
+    expect(isAuthStatusError(Object.assign(new Error("x"), { status: 401 }))).toBe(
+      true,
+    );
+  });
+
+  // The reviewer's must-fix: transient failures must NOT be treated as auth
+  // failures (which would log the user out). A 5xx mint, a thrown fetch, a
+  // file-write error — none carry status 401.
+  it("is false for transient / non-401 failures", () => {
+    expect(isAuthStatusError(Object.assign(new Error("x"), { status: 503 }))).toBe(
+      false,
+    );
+    expect(isAuthStatusError(new Error("network down"))).toBe(false);
+    expect(isAuthStatusError(new Error("EACCES: write failed"))).toBe(false);
+    expect(isAuthStatusError(undefined)).toBe(false);
+    expect(isAuthStatusError(null)).toBe(false);
+    expect(isAuthStatusError("401")).toBe(false);
   });
 });

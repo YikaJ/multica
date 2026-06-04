@@ -183,6 +183,11 @@ interface DaemonStatus {
   serverUrl?: string;
 }
 
+type DaemonReauthResult =
+  | { ok: true }
+  | { ok: false; reason: "session_invalid" }
+  | { ok: false; reason: "transient"; message: string };
+
 const daemonAPI = {
   start: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("daemon:start"),
@@ -205,6 +210,11 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:sync-token", token, userId),
   clearToken: (): Promise<void> =>
     ipcRenderer.invoke("daemon:clear-token"),
+  reauthenticate: (
+    token: string,
+    userId: string,
+  ): Promise<DaemonReauthResult> =>
+    ipcRenderer.invoke("daemon:reauthenticate", token, userId),
   isCliInstalled: (): Promise<boolean> =>
     ipcRenderer.invoke("daemon:is-cli-installed"),
   getPrefs: (): Promise<{ autoStart: boolean; autoStop: boolean }> =>

@@ -97,6 +97,11 @@ interface DaemonPrefs {
   autoStop: boolean;
 }
 
+type DaemonReauthResult =
+  | { ok: true }
+  | { ok: false; reason: "session_invalid" }
+  | { ok: false; reason: "transient"; message: string };
+
 interface DaemonAPI {
   start: () => Promise<{ success: boolean; error?: string }>;
   stop: () => Promise<{ success: boolean; error?: string }>;
@@ -107,6 +112,10 @@ interface DaemonAPI {
   setTargetApiUrl: (url: string) => Promise<void>;
   syncToken: (token: string, userId: string) => Promise<void>;
   clearToken: () => Promise<void>;
+  reauthenticate: (
+    token: string,
+    userId: string,
+  ) => Promise<DaemonReauthResult>;
   isCliInstalled: () => Promise<boolean>;
   getPrefs: () => Promise<DaemonPrefs>;
   setPrefs: (prefs: Partial<DaemonPrefs>) => Promise<DaemonPrefs>;

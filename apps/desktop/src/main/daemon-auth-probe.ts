@@ -22,6 +22,24 @@ export interface AuthProbeOutcome {
 
 export type AuthProbeResult = "auth_expired" | "ok" | "unknown";
 
+/**
+ * Whether an error represents a genuine auth rejection (HTTP 401) as opposed to
+ * a transient failure (5xx, network, local I/O). Used by the re-authenticate
+ * flow so that only a real 401 — the session token itself is dead — forces a
+ * full re-login; transient failures keep the user signed in to retry.
+ *
+ * `mintPat` attaches the response status to the error it throws, so a 401
+ * surfaces here as `{ status: 401 }`. Everything else (no status, 5xx, a thrown
+ * fetch, a file-write error) is treated as non-auth.
+ */
+export function isAuthStatusError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { status?: unknown }).status === 401
+  );
+}
+
 export function classifyAuthProbe(outcome: AuthProbeOutcome): AuthProbeResult {
   // No credential to validate → the user must sign in.
   if (outcome.noToken) return "auth_expired";
