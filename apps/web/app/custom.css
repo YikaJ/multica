@@ -91,6 +91,41 @@
     }
 }
 
+/* Scene / popover entrances for the scripted delegate demo (value #2). */
+@keyframes newhome-fade {
+    from {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+.newhome-fade {
+    animation: newhome-fade 0.4s ease-out;
+}
+@keyframes newhome-pop {
+    from {
+        opacity: 0;
+        transform: scale(0.96) translateY(-3px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+.newhome-pop {
+    transform-origin: top left;
+    animation: newhome-pop 0.18s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+    .newhome-fade,
+    .newhome-pop {
+        animation: none;
+    }
+}
+
 /* newhome "this is live, try it" hint: the arrow draws itself in once, then the
  * whole annotation gently floats to draw the eye. Respects reduced-motion. */
 @keyframes newhome-hint-bob {
