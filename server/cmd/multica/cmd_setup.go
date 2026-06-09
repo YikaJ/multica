@@ -252,9 +252,15 @@ func persistSelfHostConfigIfReachable(serverURL, appURL, profile string, probe f
 // localhost default built from --port. userProvided is true when the URL came
 // from the user (flag or env) rather than the localhost fallback — the caller
 // uses it to decide whether a remote host needs an explicit app_url.
+//
+// A user-supplied URL is run through normalizeAPIBaseURL, the same path
+// resolveServerURL uses: MULTICA_SERVER_URL is documented as a ws:// daemon
+// address (e.g. ws://localhost:8080/ws), so the ws/wss form and a trailing /ws
+// are accepted and converted to the http(s) base that the reachability probe
+// and the stored server_url expect.
 func resolveSelfHostServerURL(cmd *cobra.Command) (serverURL string, userProvided bool) {
 	if v := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", ""); v != "" {
-		return v, true
+		return normalizeAPIBaseURL(v), true
 	}
 	port, _ := cmd.Flags().GetInt("port")
 	return fmt.Sprintf("http://localhost:%d", port), false
