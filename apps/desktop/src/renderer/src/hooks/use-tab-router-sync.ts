@@ -3,6 +3,14 @@ import type { DataRouter } from "react-router-dom";
 import { useTabStore, resolveRouteIcon } from "@/stores/tab-store";
 import { popDirectionHints } from "./use-tab-history";
 
+function locationPath(location: {
+  pathname: string;
+  search?: string;
+  hash?: string;
+}): string {
+  return `${location.pathname}${location.search ?? ""}${location.hash ?? ""}`;
+}
+
 /**
  * Subscribe to a tab's memory router and sync path + history tracking
  * back into the tab store.
@@ -15,12 +23,17 @@ export function useTabRouterSync(tabId: string, router: DataRouter) {
 
   useEffect(() => {
     // Sync initial state
-    const initialPath = router.state.location.pathname;
+    const initialLocation = router.state.location;
+    const initialPath = locationPath(initialLocation);
     const store = useTabStore.getState();
-    store.updateTab(tabId, { path: initialPath, icon: resolveRouteIcon(initialPath) });
+    store.updateTab(tabId, {
+      path: initialPath,
+      icon: resolveRouteIcon(initialLocation.pathname),
+    });
 
     const unsubscribe = router.subscribe((state) => {
       const { pathname } = state.location;
+      const path = locationPath(state.location);
       const action = state.historyAction;
 
       if (action === "PUSH") {
@@ -40,7 +53,7 @@ export function useTabRouterSync(tabId: string, router: DataRouter) {
       // REPLACE: index and length stay the same
 
       const store = useTabStore.getState();
-      store.updateTab(tabId, { path: pathname, icon: resolveRouteIcon(pathname) });
+      store.updateTab(tabId, { path, icon: resolveRouteIcon(pathname) });
       store.updateTabHistory(tabId, indexRef.current, lengthRef.current);
     });
 

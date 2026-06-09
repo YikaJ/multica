@@ -150,7 +150,8 @@ const ROUTE_ICONS: Record<string, string> = {
  *
  * Title is NOT determined here — it comes from document.title.
  */
-export function resolveRouteIcon(pathname: string): string {
+export function resolveRouteIcon(path: string): string {
+  const pathname = path.split("?")[0].split("#")[0];
   const segments = pathname.split("/").filter(Boolean);
   return ROUTE_ICONS[segments[1] ?? ""] ?? "ListTodo";
 }

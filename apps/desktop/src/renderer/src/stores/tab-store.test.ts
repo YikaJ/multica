@@ -15,6 +15,7 @@ vi.mock("../routes", () => ({
 }));
 
 import {
+  resolveRouteIcon,
   sanitizeTabPath,
   migrateV1ToV2,
   migrateV2ToV3,
@@ -43,6 +44,9 @@ describe("sanitizeTabPath", () => {
   it("passes through valid workspace-scoped paths", () => {
     expect(sanitizeTabPath("/acme/issues")).toBe("/acme/issues");
     expect(sanitizeTabPath("/my-team/projects/abc")).toBe("/my-team/projects/abc");
+    expect(sanitizeTabPath("/acme/inbox?issue=MUL-123#comment-1")).toBe(
+      "/acme/inbox?issue=MUL-123#comment-1",
+    );
   });
 
   it("rejects paths whose first segment is a reserved slug (missing workspace prefix)", () => {
@@ -56,6 +60,13 @@ describe("sanitizeTabPath", () => {
   it("passes through user slugs that happen to look path-like but aren't reserved", () => {
     expect(sanitizeTabPath("/acme-issues/issues")).toBe("/acme-issues/issues");
     expect(sanitizeTabPath("/project-x/inbox")).toBe("/project-x/inbox");
+  });
+});
+
+describe("resolveRouteIcon", () => {
+  it("uses the pathname route segment when a tab path includes search or hash", () => {
+    expect(resolveRouteIcon("/acme/inbox?issue=MUL-123#comment-1")).toBe("Inbox");
+    expect(resolveRouteIcon("/acme/issues/issue-1?view=detail")).toBe("ListTodo");
   });
 });
 
