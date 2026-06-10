@@ -3,17 +3,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
+import { issueKeys } from "@multica/core/issues/queries";
 import type { CommentTriggerPreviewAgent } from "@multica/core/types";
 
 const COMMENT_TRIGGER_PREVIEW_DEBOUNCE_MS = 300;
 const MENTION_RE = /\[@?(.+?)\]\(mention:\/\/(member|agent|squad|issue|all)\/([0-9a-fA-F-]+|all)\)/g;
 const NOTE_COMMAND_RE = /^\/note(?:$|\s)/i;
 
-export type CommentTriggerPreviewStatus = "idle" | "loading" | "error";
-
 export interface UseCommentTriggerPreviewResult {
   agents: CommentTriggerPreviewAgent[];
-  status: CommentTriggerPreviewStatus;
 }
 
 export function isNoteCommentDraft(content: string): boolean {
@@ -75,25 +73,18 @@ export function useCommentTriggerPreview({
   }, [content]);
 
   const previewQuery = useQuery({
-    queryKey: ["issues", "comment-trigger-preview", issueId, parentId ?? "", debouncedSignature],
+    queryKey: [...issueKeys.commentTriggerPreview(issueId), parentId ?? "", debouncedSignature],
     queryFn: () => api.previewCommentTriggers(issueId, contentRef.current, parentId),
     enabled: signature !== "empty" && debouncedSignature !== "empty",
     retry: false,
     staleTime: Infinity,
   });
 
+  // Loading and errors intentionally surface as "no agents": the preview is
+  // an enhancement, and the composer renders nothing for an empty list.
   if (signature === "empty" || debouncedSignature === "empty") {
-    return { agents: [], status: "idle" };
+    return { agents: [] };
   }
 
-  const status: CommentTriggerPreviewStatus = previewQuery.isError
-    ? "error"
-    : previewQuery.isFetching
-      ? "loading"
-      : "idle";
-
-  return {
-    agents: previewQuery.data?.agents ?? [],
-    status,
-  };
+  return { agents: previewQuery.data?.agents ?? [] };
 }

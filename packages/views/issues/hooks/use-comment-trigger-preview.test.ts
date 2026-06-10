@@ -122,7 +122,7 @@ describe("useCommentTriggerPreview", () => {
 
     await advancePreviewDebounce();
 
-    expect(result.current).toEqual({ agents: [], status: "idle" });
+    expect(result.current).toEqual({ agents: [] });
     expect(previewCommentTriggers).not.toHaveBeenCalled();
   });
 });

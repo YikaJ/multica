@@ -184,7 +184,6 @@ function ReplyInput({
           <CommentTriggerChips
             agents={triggerPreview.agents}
             suppressedAgentIds={suppressedAgentIds}
-            status={triggerPreview.status}
             onToggle={toggleSuppressedAgent}
           />
         </div>

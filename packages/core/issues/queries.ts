@@ -67,6 +67,9 @@ export const issueKeys = {
   /** Full-issue timeline (single TanStack Query, no cursor). */
   timeline: (issueId: string) =>
     ["issues", "timeline", issueId] as const,
+  /** PREFIX for invalidation — the composer hook appends parent + content signature. */
+  commentTriggerPreview: (issueId: string) =>
+    ["issues", "comment-trigger-preview", issueId] as const,
   reactions: (issueId: string) => ["issues", "reactions", issueId] as const,
   subscribers: (issueId: string) =>
     ["issues", "subscribers", issueId] as const,
