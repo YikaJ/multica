@@ -71,6 +71,7 @@
     "section_run_history": "Run History",
     "section_danger": "Danger Zone",
     "field_agent": "Agent",
+    "field_created_by": "Created by",
     "field_output_mode": "Output Mode",
     "field_project": "Project",
     "no_project": "No project",
