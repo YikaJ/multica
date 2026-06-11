@@ -78,6 +78,21 @@ export {
   type FeedbackOpenedSource,
 } from "./feedback";
 
+export {
+  buildCommentTriggerPreviewSnapshotPayload,
+  buildCommentTriggerPreviewTogglePayload,
+  captureCommentTriggerPreviewRestored,
+  captureCommentTriggerPreviewSent,
+  captureCommentTriggerPreviewShown,
+  captureCommentTriggerPreviewSuppressed,
+  normalizeCommentTriggerPreviewSource,
+  type CommentTriggerPreviewAnalyticsContext,
+  type CommentTriggerPreviewComposer,
+  type CommentTriggerPreviewSnapshotPayload,
+  type CommentTriggerPreviewSource,
+  type CommentTriggerPreviewTogglePayload,
+} from "./comment-trigger-preview";
+
 export interface AnalyticsConfig {
   key: string;
   host: string;

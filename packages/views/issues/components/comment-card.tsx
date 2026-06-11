@@ -37,6 +37,7 @@ import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
+import type { CommentTriggerPreviewAnalyticsContext } from "@multica/core/analytics";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
@@ -102,7 +103,13 @@ interface CommentCardProps {
    * `CommentRow` has to rerun the rule per row.
    */
   canModerate?: boolean;
-  onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<void>;
+  onReply: (
+    parentId: string,
+    content: string,
+    attachmentIds?: string[],
+    suppressAgentIds?: string[],
+    triggerPreviewAnalytics?: CommentTriggerPreviewAnalyticsContext,
+  ) => Promise<void>;
   onEdit: (commentId: string, content: string, attachmentIds: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
@@ -928,7 +935,13 @@ function CommentCardImpl({
                   avatarType="member"
                   avatarId={currentUserId ?? ""}
                   draftKey={`reply:${issueId}:${entry.id}`}
-                  onSubmit={(content, attachmentIds, suppressAgentIds) => onReply(entry.id, content, attachmentIds, suppressAgentIds)}
+                  onSubmit={(content, attachmentIds, suppressAgentIds, triggerPreviewAnalytics) => onReply(
+                    entry.id,
+                    content,
+                    attachmentIds,
+                    suppressAgentIds,
+                    triggerPreviewAnalytics,
+                  )}
                 />
               </div>
             </>

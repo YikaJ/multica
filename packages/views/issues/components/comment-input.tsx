@@ -7,16 +7,23 @@ import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import type { Attachment } from "@multica/core/types";
+import type { CommentTriggerPreviewAnalyticsContext } from "@multica/core/analytics";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
+import { useCommentTriggerPreviewAnalytics } from "../hooks/use-comment-trigger-preview-analytics";
 
 interface CommentInputProps {
   issueId: string;
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<void>;
+  onSubmit: (
+    content: string,
+    attachmentIds?: string[],
+    suppressAgentIds?: string[],
+    triggerPreviewAnalytics?: CommentTriggerPreviewAnalyticsContext,
+  ) => Promise<void>;
 }
 
 function CommentInput({ issueId, onSubmit }: CommentInputProps) {
@@ -33,6 +40,14 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const [submitting, setSubmitting] = useState(false);
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
   const triggerPreview = useCommentTriggerPreview({ issueId, content });
+  const {
+    captureToggle: captureTriggerPreviewToggle,
+    buildSentContext: buildTriggerPreviewSentContext,
+  } = useCommentTriggerPreviewAnalytics({
+    composer: "comment",
+    agents: triggerPreview.agents,
+    suppressedAgentIds,
+  });
   // Attachments uploaded in this composer session. Drives both:
   //  - submit-time `attachment_ids` payload (filtered to URLs still in markdown)
   //  - the editor's AttachmentDownloadProvider, so file-card Eye buttons can
@@ -80,13 +95,12 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   }, [triggerPreview.agents]);
 
   const toggleSuppressedAgent = useCallback((agentId: string) => {
-    setSuppressedAgentIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(agentId)) next.delete(agentId);
-      else next.add(agentId);
-      return next;
-    });
-  }, []);
+    const next = new Set(suppressedAgentIds);
+    if (next.has(agentId)) next.delete(agentId);
+    else next.add(agentId);
+    setSuppressedAgentIds(next);
+    captureTriggerPreviewToggle(agentId, next);
+  }, [captureTriggerPreviewToggle, suppressedAgentIds]);
 
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
@@ -107,6 +121,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
+        buildTriggerPreviewSentContext(),
       );
       editorRef.current?.clearContent();
       setContent("");

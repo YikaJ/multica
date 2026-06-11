@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import type { CommentTriggerPreviewAnalyticsContext } from "@multica/core/analytics";
 import { renderWithI18n } from "../../test/i18n";
 import { CommentInput } from "./comment-input";
 import { ReplyInput } from "./reply-input";
@@ -97,7 +98,12 @@ function renderReplyInput({
   onSubmit = vi.fn().mockResolvedValue(undefined),
   size = "sm",
 }: {
-  onSubmit?: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<void>;
+  onSubmit?: (
+    content: string,
+    attachmentIds?: string[],
+    suppressAgentIds?: string[],
+    triggerPreviewAnalytics?: CommentTriggerPreviewAnalyticsContext,
+  ) => Promise<void>;
   size?: "sm" | "default";
 } = {}) {
   const view = renderWithProviders(
@@ -168,7 +174,7 @@ describe("comment composers", () => {
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("hello from composer", undefined, undefined);
+      expect(onSubmit).toHaveBeenCalledWith("hello from composer", undefined, undefined, undefined);
     });
   });
 
@@ -181,7 +187,7 @@ describe("comment composers", () => {
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("thread reply", undefined, undefined);
+      expect(onSubmit).toHaveBeenCalledWith("thread reply", undefined, undefined, undefined);
     });
   });
 });

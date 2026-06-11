@@ -7,13 +7,20 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { setApiInstance } from "../api";
+import type { CommentTriggerPreviewAnalyticsContext } from "../analytics";
 import type { ApiClient } from "../api/client";
-import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus, useResolveComment } from "./mutations";
+import {
+  useCreateComment,
+  useLoadMoreByAssigneeGroup,
+  useLoadMoreByStatus,
+  useResolveComment,
+} from "./mutations";
 import {
   issueKeys,
   type IssueSortParam,
 } from "./queries";
 import type {
+  Comment,
   GroupedIssuesResponse,
   Issue,
   ListIssuesCache,
@@ -22,6 +29,16 @@ import type {
   ListIssuesResponse,
   TimelineEntry,
 } from "../types";
+
+const captureCommentTriggerPreviewSent = vi.hoisted(() => vi.fn());
+
+vi.mock("../analytics", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../analytics")>();
+  return {
+    ...actual,
+    captureCommentTriggerPreviewSent,
+  };
+});
 
 vi.mock("../hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -61,6 +78,119 @@ function createWrapper(qc: QueryClient) {
     return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
   };
 }
+
+function makeComment(overrides: Partial<Comment> = {}): Comment {
+  return {
+    id: "comment-1",
+    issue_id: "issue-1",
+    author_type: "member",
+    author_id: "user-1",
+    content: "hello",
+    type: "comment",
+    parent_id: null,
+    reactions: [],
+    attachments: [],
+    created_at: "2026-06-11T00:00:00Z",
+    updated_at: "2026-06-11T00:00:00Z",
+    resolved_at: null,
+    resolved_by_type: null,
+    resolved_by_id: null,
+    ...overrides,
+  };
+}
+
+describe("useCreateComment", () => {
+  let qc: QueryClient;
+  let createComment: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    createComment = vi.fn().mockResolvedValue(makeComment());
+    captureCommentTriggerPreviewSent.mockReset();
+    setApiInstance({ createComment } as unknown as ApiClient);
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("does not capture sent analytics when no trigger preview context is provided", async () => {
+    const { result } = renderHook(() => useCreateComment("issue-1"), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ content: "hello" });
+    });
+
+    expect(captureCommentTriggerPreviewSent).not.toHaveBeenCalled();
+  });
+
+  it("does not capture sent analytics when the submit-time agent count is zero", async () => {
+    const { result } = renderHook(() => useCreateComment("issue-1"), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        content: "hello",
+        triggerPreviewAnalytics: {
+          composer: "comment",
+          agent_count: 0,
+          active_count: 0,
+          suppressed_count: 0,
+          sources: [],
+        },
+      });
+    });
+
+    expect(captureCommentTriggerPreviewSent).not.toHaveBeenCalled();
+  });
+
+  it("captures sent analytics from mutation success using submit-time counts", async () => {
+    const triggerPreviewAnalytics: CommentTriggerPreviewAnalyticsContext = {
+      composer: "reply",
+      agent_count: 2,
+      active_count: 1,
+      suppressed_count: 1,
+      sources: ["issue_assignee", "mention_agent"],
+    };
+    const { result } = renderHook(() => useCreateComment("issue-1"), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        content: "hello",
+        triggerPreviewAnalytics,
+      });
+    });
+
+    expect(captureCommentTriggerPreviewSent).toHaveBeenCalledTimes(1);
+    expect(captureCommentTriggerPreviewSent).toHaveBeenCalledWith(triggerPreviewAnalytics);
+  });
+
+  it("does not capture sent analytics when comment creation fails", async () => {
+    createComment.mockRejectedValueOnce(new Error("create failed"));
+    const { result } = renderHook(() => useCreateComment("issue-1"), {
+      wrapper: createWrapper(qc),
+    });
+
+    await expect(result.current.mutateAsync({
+      content: "hello",
+      triggerPreviewAnalytics: {
+        composer: "comment",
+        agent_count: 1,
+        active_count: 1,
+        suppressed_count: 0,
+        sources: ["issue_assignee"],
+      },
+    })).rejects.toThrow("create failed");
+
+    expect(captureCommentTriggerPreviewSent).not.toHaveBeenCalled();
+  });
+});
 
 describe("useLoadMoreByStatus", () => {
   let qc: QueryClient;

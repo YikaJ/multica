@@ -33,6 +33,7 @@ import {
   useToggleCommentReaction,
   type ToggleCommentReactionVars,
 } from "@multica/core/issues/mutations";
+import type { CommentTriggerPreviewAnalyticsContext } from "@multica/core/analytics";
 import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { toast } from "sonner";
@@ -259,10 +260,20 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   // --- Mutation functions ---
 
   const submitComment = useCallback(
-    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => {
+    async (
+      content: string,
+      attachmentIds?: string[],
+      suppressAgentIds?: string[],
+      triggerPreviewAnalytics?: CommentTriggerPreviewAnalyticsContext,
+    ) => {
       if (!content.trim() || !userId) return;
       try {
-        await createComment({ content, attachmentIds, suppressAgentIds });
+        await createComment({
+          content,
+          attachmentIds,
+          suppressAgentIds,
+          triggerPreviewAnalytics,
+        });
       } catch (err) {
         toast.error(
           err instanceof Error && err.message
@@ -275,7 +286,13 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   );
 
   const submitReply = useCallback(
-    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => {
+    async (
+      parentId: string,
+      content: string,
+      attachmentIds?: string[],
+      suppressAgentIds?: string[],
+      triggerPreviewAnalytics?: CommentTriggerPreviewAnalyticsContext,
+    ) => {
       if (!content.trim() || !userId) return;
       try {
         await createComment({
@@ -284,6 +301,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           parentId,
           attachmentIds,
           suppressAgentIds,
+          triggerPreviewAnalytics,
         });
       } catch (err) {
         toast.error(

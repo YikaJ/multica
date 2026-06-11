@@ -103,7 +103,7 @@ Every event is assigned to one dashboard category:
 
 | Category | Events |
 |---|---|
-| `core_loop` | `workspace_created`, `agent_created`, `issue_created`, `chat_message_sent`, `issue_executed`, `autopilot_created`, `squad_created` |
+| `core_loop` | `workspace_created`, `agent_created`, `issue_created`, `chat_message_sent`, `issue_executed`, `autopilot_created`, `squad_created`, `comment_trigger_preview_shown`, `comment_trigger_preview_suppressed`, `comment_trigger_preview_restored`, `comment_trigger_preview_sent` |
 | `onboarding_support` | `onboarding_started`, `onboarding_questionnaire_submitted`, `onboarding_completed`, `onboarding_runtime_path_selected`, `onboarding_runtime_detected` |
 | `acquisition` | `signup`, `download_intent_expressed`, `download_page_viewed`, `download_initiated`, `cloud_waitlist_joined`, `contact_sales_submitted` |
 | `ops_feedback` | `feedback_opened`, `feedback_submitted` |
@@ -645,6 +645,48 @@ sent from a pre-workspace surface.
     keyboard shortcut or error-toast CTA will pass their own value)
   - `workspace_id`: string (UUID) when the modal opens inside a
     workspace. Omitted on pre-workspace surfaces.
+
+- `comment_trigger_preview_shown` — fired from the shared issue root
+  comment composer and reply composer when the agent trigger preview
+  chip changes from not rendered to rendered. Empty previews do not
+  emit an event. Properties:
+  - `composer`: `comment` / `reply`.
+  - `agent_count`: total visible preview agents.
+  - `active_count`: visible preview agents that will still trigger.
+  - `suppressed_count`: visible preview agents the user has disabled.
+  - `sources`: sorted, de-duplicated snapshot of all visible preview
+    agent sources.
+
+- `comment_trigger_preview_suppressed` and
+  `comment_trigger_preview_restored` — fired when the user toggles one
+  visible preview agent off or back on. Properties:
+  - `composer`: `comment` / `reply`.
+  - `agent_count`: total visible preview agents.
+  - `active_count`: visible preview agents that will still trigger
+    after the toggle.
+  - `suppressed_count`: visible preview agents disabled after the
+    toggle.
+  - `source`: source for the single agent that was toggled.
+
+- `comment_trigger_preview_sent` — fired from the create-comment
+  mutation success path, only when the submit-time preview had at least
+  one visible agent. Properties:
+  - `composer`: `comment` / `reply`.
+  - `agent_count`: total visible preview agents at submit time.
+  - `active_count`: submit-time preview agents that still trigger.
+  - `suppressed_count`: submit-time preview agents disabled by the
+    user.
+  - `sources`: sorted, de-duplicated snapshot of all submit-time
+    preview agent sources.
+
+  For comment trigger preview events, `source` is the singular source
+  for the agent affected by a suppress/restore action. `sources` is a
+  snapshot collection for shown/sent events. Both fields use the same
+  strict whitelist: `issue_assignee`, `mention_agent`,
+  `mention_squad_leader`, or `unknown`. New backend source strings must
+  normalize to `unknown`; they must not pass through to PostHog. These
+  events must not include `issue_id`, `workspace_id`, `agent_id`, agent
+  names, agent `reason`, comment content, or raw mention text.
 
 - Attribution is NOT a separate event; UTM + referrer origin are written
   to the `multica_signup_source` cookie on the first anonymous pageview

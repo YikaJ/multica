@@ -2,6 +2,10 @@ import { useState, useCallback } from "react";
 import { useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { api } from "../api";
 import {
+  captureCommentTriggerPreviewSent,
+  type CommentTriggerPreviewAnalyticsContext,
+} from "../analytics";
+import {
   issueKeys,
   ISSUE_PAGE_SIZE,
   type AssigneeGroupedIssuesFilter,
@@ -605,8 +609,9 @@ export function useCreateComment(issueId: string) {
       parentId?: string;
       attachmentIds?: string[];
       suppressAgentIds?: string[];
+      triggerPreviewAnalytics?: CommentTriggerPreviewAnalyticsContext;
     }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds),
-    onSuccess: (comment) => {
+    onSuccess: (comment, { triggerPreviewAnalytics }) => {
       const entry: TimelineEntry = {
         type: "comment",
         id: comment.id,
@@ -632,6 +637,9 @@ export function useCreateComment(issueId: string) {
       // task now dedupes follow-up triggers), so cached previews for this
       // issue are stale the moment the create lands.
       qc.invalidateQueries({ queryKey: issueKeys.commentTriggerPreview(issueId) });
+      if (triggerPreviewAnalytics && triggerPreviewAnalytics.agent_count >= 1) {
+        captureCommentTriggerPreviewSent(triggerPreviewAnalytics);
+      }
     },
     // No onSettled invalidate. The `comment:created` WS broadcast keeps
     // the timeline cache fresh after a successful create, and reconnect
