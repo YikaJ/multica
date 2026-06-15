@@ -293,6 +293,30 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.22",
+        date: "2026-06-15",
+        title: "Workspace Lists, Runtime Setup, and Safer Issue Editing",
+        changes: [],
+        features: [
+          "Agents, autopilots, projects, runtimes, skills, and squads now share a faster list experience with clearer rows, actions, filters, and selection",
+          "The CLI can now manage workspace repositories, making it easier to keep project repo context ready for local agents",
+          "Cursor and OpenClaw setup gained new runtime options, including managed Cursor MCP configuration and support for connecting to an existing OpenClaw gateway",
+          "Comment edits can now show and control which agents or squads would run before the update is saved",
+        ],
+        improvements: [
+          "Desktop recovery prompts include more page context, helping users explain where a stuck window failed",
+          "Long Issue and inbox views better preserve scroll position and comment anchors when moving away and coming back",
+          "Cursor usage and billing details are clearer across Composer, cached inputs, and newer Cursor agent output",
+        ],
+        fixes: [
+          "Issue attachments, inline images, and file cards stay accessible more reliably across web, desktop, mobile, and token-based clients",
+          "Dollar amounts and email links are handled more predictably in the editor and read-only Issue content",
+          "Desktop Cmd+W now closes the active tab first, then the window when no tab can be closed",
+          "Self-hosted Docker Compose uploads and defaults now fail less often and validate missing values earlier",
+          "Agent task authentication now fails closed when a run token is not valid",
+        ],
+      },
+      {
         version: "0.3.21",
         date: "2026-06-12",
         title: "CodeBuddy Runtime",
