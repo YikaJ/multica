@@ -235,6 +235,33 @@ func TestClaudeHandleUserDetectsAsyncLaunchedToolResult(t *testing.T) {
 	}
 }
 
+func TestClaudeHandleUserIgnoresAsyncLaunchedTextOutput(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+
+	msg := claudeSDKMessage{
+		Type: "user",
+		Message: mustMarshal(t, claudeMessageContent{
+			Role: "user",
+			Content: []claudeContentBlock{
+				{
+					Type:      "tool_result",
+					ToolUseID: "call-1",
+					Content: mustMarshal(t, map[string]any{
+						"stdout": `fixture contained {"status":"async_launched"} as plain text`,
+					}),
+				},
+			},
+		}),
+	}
+
+	if b.handleUser(msg, ch) {
+		t.Fatal("did not expect async launch to be detected in ordinary text output")
+	}
+}
+
 func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 	t.Parallel()
 

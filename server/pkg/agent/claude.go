@@ -390,33 +390,32 @@ func claudeToolResultHasAsyncLaunch(raw json.RawMessage) bool {
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return false
 	}
-	return claudeValueHasAsyncLaunch(value)
-}
-
-func claudeValueHasAsyncLaunch(value any) bool {
 	switch v := value.(type) {
 	case map[string]any:
-		if status, ok := v["status"].(string); ok && status == "async_launched" {
+		if claudeMapHasAsyncLaunchStatus(v) {
 			return true
 		}
-		for _, nested := range v {
-			if claudeValueHasAsyncLaunch(nested) {
-				return true
-			}
+		if content, ok := v["content"].([]any); ok {
+			return claudeArrayHasAsyncLaunchStatus(content)
 		}
 	case []any:
-		for _, nested := range v {
-			if claudeValueHasAsyncLaunch(nested) {
-				return true
-			}
-		}
-	case string:
-		var nested any
-		if err := json.Unmarshal([]byte(v), &nested); err == nil {
-			return claudeValueHasAsyncLaunch(nested)
+		return claudeArrayHasAsyncLaunchStatus(v)
+	}
+	return false
+}
+
+func claudeArrayHasAsyncLaunchStatus(values []any) bool {
+	for _, value := range values {
+		if item, ok := value.(map[string]any); ok && claudeMapHasAsyncLaunchStatus(item) {
+			return true
 		}
 	}
 	return false
+}
+
+func claudeMapHasAsyncLaunchStatus(value map[string]any) bool {
+	status, ok := value["status"].(string)
+	return ok && status == "async_launched"
 }
 
 // ── Claude SDK JSON types ──
