@@ -13,6 +13,35 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+func installAutopilotSubscriberInsertFailure(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	functionName := fmt.Sprintf("autopilot_subscriber_fail_fn_%d", suffix)
+	triggerName := fmt.Sprintf("autopilot_subscriber_fail_%d", suffix)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, fmt.Sprintf(`DROP TRIGGER IF EXISTS %s ON autopilot_subscriber`, triggerName))
+		testPool.Exec(ctx, fmt.Sprintf(`DROP FUNCTION IF EXISTS %s()`, functionName))
+	})
+
+	if _, err := testPool.Exec(ctx, fmt.Sprintf(`
+CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+	RAISE EXCEPTION 'forced autopilot subscriber insert failure';
+END;
+$$;
+`, functionName)); err != nil {
+		t.Fatalf("install failure function: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, fmt.Sprintf(`
+CREATE TRIGGER %s
+BEFORE INSERT ON autopilot_subscriber
+FOR EACH ROW EXECUTE FUNCTION %s();
+`, triggerName, functionName)); err != nil {
+		t.Fatalf("install failure trigger: %v", err)
+	}
+}
+
 // TestCreateAutopilotPersistsMemberSubscribers covers the happy path:
 // supplying a non-empty `subscribers` array on POST /api/autopilots stores
 // the rows and the response echoes them back. This is the create half of the
@@ -118,6 +147,43 @@ func TestCreateAutopilotRejectsForeignSubscriber(t *testing.T) {
 	}
 }
 
+func TestCreateAutopilotRollsBackWhenSubscriberInsertFails(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Subscriber rollback create %d", time.Now().UnixNano())
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	installAutopilotSubscriberInsertFailure(t)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":          title,
+		"assignee_id":    agentID,
+		"execution_mode": "create_issue",
+		"subscribers": []map[string]any{
+			{"user_type": "member", "user_id": testUserID},
+		},
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("CreateAutopilot: expected 500 for forced subscriber insert failure, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM autopilot
+		WHERE workspace_id = $1 AND title = $2
+	`, testWorkspaceID, title).Scan(&count); err != nil {
+		t.Fatalf("count rolled-back autopilots: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("autopilot rows after failed subscriber insert = %d, want 0", count)
+	}
+}
+
 // TestUpdateAutopilotFullReplaceSubscribers covers the PATCH semantics from
 // the RFC: sending `subscribers` wipes whatever was there and re-inserts the
 // new set. Omitting the field would leave the previous template untouched;
@@ -179,6 +245,73 @@ func TestUpdateAutopilotFullReplaceSubscribers(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("DB rows after empty replace = %d, want 0", count)
+	}
+}
+
+func TestUpdateAutopilotRollsBackWhenSubscriberInsertFails(t *testing.T) {
+	ctx := context.Background()
+	originalTitle := fmt.Sprintf("Subscriber rollback update %d", time.Now().UnixNano())
+	updatedTitle := originalTitle + " changed"
+	var autopilotID string
+	defer func() {
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+	}()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":          originalTitle,
+		"assignee_id":    agentID,
+		"execution_mode": "create_issue",
+		"subscribers": []map[string]any{
+			{"user_type": "member", "user_id": testUserID},
+		},
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created: %v", err)
+	}
+	autopilotID = created.ID
+
+	installAutopilotSubscriberInsertFailure(t)
+
+	w = httptest.NewRecorder()
+	req = newRequest("PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, map[string]any{
+		"title": updatedTitle,
+		"subscribers": []map[string]any{
+			{"user_type": "member", "user_id": testUserID},
+		},
+	})
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.UpdateAutopilot(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("UpdateAutopilot: expected 500 for forced subscriber insert failure, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var gotTitle string
+	if err := testPool.QueryRow(ctx, `SELECT title FROM autopilot WHERE id = $1`, autopilotID).Scan(&gotTitle); err != nil {
+		t.Fatalf("load autopilot title after rollback: %v", err)
+	}
+	if gotTitle != originalTitle {
+		t.Fatalf("autopilot title after failed subscriber replace = %q, want %q", gotTitle, originalTitle)
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM autopilot_subscriber WHERE autopilot_id = $1`, autopilotID).Scan(&count); err != nil {
+		t.Fatalf("count subscribers after rollback: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("subscriber rows after failed replace = %d, want 1", count)
 	}
 }
 

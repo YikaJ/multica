@@ -498,7 +498,15 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	autopilot, err := h.Queries.CreateAutopilot(r.Context(), db.CreateAutopilotParams{
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	autopilot, err := qtx.CreateAutopilot(r.Context(), db.CreateAutopilotParams{
 		WorkspaceID:        wsUUID,
 		Title:              req.Title,
 		AssigneeType:       assigneeType,
@@ -517,7 +525,7 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, uid := range subscriberUUIDs {
-		if err := h.Queries.AddAutopilotSubscriber(r.Context(), db.AddAutopilotSubscriberParams{
+		if err := qtx.AddAutopilotSubscriber(r.Context(), db.AddAutopilotSubscriberParams{
 			AutopilotID: autopilot.ID,
 			UserType:    "member",
 			UserID:      uid,
@@ -525,6 +533,10 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to add autopilot subscriber")
 			return
 		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
+		return
 	}
 	subs, err := h.Queries.ListAutopilotSubscribers(r.Context(), autopilot.ID)
 	if err != nil {
@@ -706,22 +718,27 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		subscriberUUIDs = validated
 	}
 
-	autopilot, err := h.Queries.UpdateAutopilot(r.Context(), params)
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update autopilot")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	autopilot, err := qtx.UpdateAutopilot(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update autopilot")
 		return
 	}
 
 	if replaceSubscribers {
-		// Full replace is non-transactional: a dispatch racing the
-		// delete-then-insert window would see an empty template. Acceptable
-		// given the 1s minimum scheduler interval; avoids a second tx path.
-		if err := h.Queries.DeleteAutopilotSubscribersForAutopilot(r.Context(), autopilot.ID); err != nil {
+		if err := qtx.DeleteAutopilotSubscribersForAutopilot(r.Context(), autopilot.ID); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to update subscribers")
 			return
 		}
 		for _, uid := range subscriberUUIDs {
-			if err := h.Queries.AddAutopilotSubscriber(r.Context(), db.AddAutopilotSubscriberParams{
+			if err := qtx.AddAutopilotSubscriber(r.Context(), db.AddAutopilotSubscriberParams{
 				AutopilotID: autopilot.ID,
 				UserType:    "member",
 				UserID:      uid,
@@ -730,6 +747,11 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update autopilot")
+		return
 	}
 
 	subs, err := h.Queries.ListAutopilotSubscribers(r.Context(), autopilot.ID)
