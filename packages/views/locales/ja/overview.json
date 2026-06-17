@@ -4,9 +4,16 @@
   "subtitle": "このワークスペースのアクティビティ、プロジェクト変更、使用量です。",
   "window_label": "直近 {{days}} 日",
   "tabs": {
-    "activity": "アクティビティ",
+    "activity": "タイムライン",
     "wrapup": "まとめ",
     "usage": "使用量"
+  },
+  "filters": {
+    "showing": "表示",
+    "all_projects": "すべてのプロジェクト",
+    "by": "by",
+    "everyone": "全員",
+    "filter_placeholder": "フィルター..."
   },
   "summary": {
     "cost_label": "コスト - {{days}} 日",
@@ -34,6 +41,8 @@
     "empty_body": "作業が動き始めると、ワークスペースのアクティビティがここに表示されます。",
     "issue_count_one": "{{count}} 件のイシュー",
     "issue_count_other": "{{count}} 件のイシュー",
+    "active_agents_one": "{{count}} 件の agent がアクティブ",
+    "active_agents_other": "{{count}} 件の agent がアクティブ",
     "kind": {
       "issue": "イシュー",
       "project": "プロジェクト",
@@ -54,6 +63,10 @@
   "wrapup": {
     "title": "プロジェクト",
     "description": "最近のアクティビティ順のプロジェクトグループです。",
+    "date_label": "今日",
+    "section_title": "プロジェクト内",
+    "project_count_one": "{{count}} 件のプロジェクト",
+    "project_count_other": "{{count}} 件のプロジェクト",
     "empty_title": "まだプロジェクトがありません",
     "empty_body": "プロジェクトや未分類のイシューが作成されると、ここに表示されます。",
     "no_project": "プロジェクトなし",
@@ -67,6 +80,9 @@
   "usage": {
     "title": "使用量",
     "description": "{{days}} 日間の agent コスト、トークン、実行時間です。",
+    "date_label": "直近 {{days}} 日",
+    "agent_count_one": "{{count}} 件の agent に使用量あり",
+    "agent_count_other": "{{count}} 件の agent に使用量あり",
     "cost": "コスト",
     "tokens": "トークン",
     "run_time": "実行時間",

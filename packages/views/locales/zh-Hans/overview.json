@@ -4,9 +4,16 @@
   "subtitle": "查看此工作区的动态、项目变化和用量。",
   "window_label": "最近 {{days}} 天",
   "tabs": {
-    "activity": "动态",
+    "activity": "时间线",
     "wrapup": "总结",
     "usage": "用量"
+  },
+  "filters": {
+    "showing": "显示",
+    "all_projects": "所有项目",
+    "by": "由",
+    "everyone": "所有人",
+    "filter_placeholder": "筛选..."
   },
   "summary": {
     "cost_label": "成本 - {{days}} 天",
@@ -34,6 +41,8 @@
     "empty_body": "工作开始推进后，工作区动态会显示在这里。",
     "issue_count_one": "{{count}} 个 issue",
     "issue_count_other": "{{count}} 个 issue",
+    "active_agents_one": "{{count}} 个 agent 活跃",
+    "active_agents_other": "{{count}} 个 agent 活跃",
     "kind": {
       "issue": "Issue",
       "project": "项目",
@@ -54,6 +63,10 @@
   "wrapup": {
     "title": "项目",
     "description": "按最近动态排序的项目分组。",
+    "date_label": "今天",
+    "section_title": "在项目中",
+    "project_count_one": "{{count}} 个项目",
+    "project_count_other": "{{count}} 个项目",
     "empty_title": "暂无项目",
     "empty_body": "创建项目或未分组 issue 后会显示在这里。",
     "no_project": "无项目",
@@ -67,6 +80,9 @@
   "usage": {
     "title": "用量",
     "description": "最近 {{days}} 天的 agent 成本、Token 和运行时间。",
+    "date_label": "最近 {{days}} 天",
+    "agent_count_one": "{{count}} 个 agent 有用量",
+    "agent_count_other": "{{count}} 个 agent 有用量",
     "cost": "成本",
     "tokens": "Token",
     "run_time": "运行时间",

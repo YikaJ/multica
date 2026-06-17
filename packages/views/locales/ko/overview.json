@@ -4,9 +4,16 @@
   "subtitle": "이 워크스페이스의 활동, 프로젝트 변경, 사용량입니다.",
   "window_label": "최근 {{days}}일",
   "tabs": {
-    "activity": "활동",
+    "activity": "타임라인",
     "wrapup": "요약",
     "usage": "사용량"
+  },
+  "filters": {
+    "showing": "표시",
+    "all_projects": "모든 프로젝트",
+    "by": "작성자",
+    "everyone": "모두",
+    "filter_placeholder": "필터..."
   },
   "summary": {
     "cost_label": "비용 - {{days}}일",
@@ -34,6 +41,8 @@
     "empty_body": "작업이 시작되면 워크스페이스 활동이 여기에 표시됩니다.",
     "issue_count_one": "이슈 {{count}}개",
     "issue_count_other": "이슈 {{count}}개",
+    "active_agents_one": "활성 agent {{count}}개",
+    "active_agents_other": "활성 agent {{count}}개",
     "kind": {
       "issue": "이슈",
       "project": "프로젝트",
@@ -54,6 +63,10 @@
   "wrapup": {
     "title": "프로젝트",
     "description": "최근 활동 순으로 정렬된 프로젝트 그룹입니다.",
+    "date_label": "오늘",
+    "section_title": "프로젝트",
+    "project_count_one": "프로젝트 {{count}}개",
+    "project_count_other": "프로젝트 {{count}}개",
     "empty_title": "아직 프로젝트 없음",
     "empty_body": "프로젝트와 그룹 없는 이슈가 생기면 여기에 표시됩니다.",
     "no_project": "프로젝트 없음",
@@ -67,6 +80,9 @@
   "usage": {
     "title": "사용량",
     "description": "{{days}}일 동안의 agent 비용, 토큰, 실행 시간입니다.",
+    "date_label": "최근 {{days}}일",
+    "agent_count_one": "사용량이 있는 agent {{count}}개",
+    "agent_count_other": "사용량이 있는 agent {{count}}개",
     "cost": "비용",
     "tokens": "토큰",
     "run_time": "실행 시간",

@@ -1,27 +1,16 @@
 "use client";
 
-import { useMemo, type ComponentType, type ReactNode } from "react";
+import { useMemo, useState, type ComponentType, type ReactNode } from "react";
 import {
-  Activity,
   BarChart3,
   Bot,
-  CheckCircle2,
   Clock3,
   FolderKanban,
-  Gauge,
   ListTodo,
-  TrendingUp,
+  Search,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
-import { Badge } from "@multica/ui/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@multica/ui/components/ui/card";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
   Tabs,
@@ -77,6 +66,13 @@ interface ActivityItem {
   timestamp: string;
   icon: IconComponent;
   node?: ReactNode;
+  projectId?: string | null;
+}
+
+interface ActivityGroup {
+  key: string;
+  label: string;
+  items: ActivityItem[];
 }
 
 interface RuntimeTotals {
@@ -101,10 +97,6 @@ function formatMoney(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-function formatCount(n: number): string {
-  return n.toLocaleString();
-}
-
 function isOpenIssue(issue: Issue): boolean {
   return issue.status !== "done" && issue.status !== "cancelled";
 }
@@ -127,7 +119,7 @@ function dayLabel(timestamp: string, todayLabel: string, yesterdayLabel: string)
   if (diffDays === 0) return todayLabel;
   if (diffDays === 1) return yesterdayLabel;
   return date.toLocaleDateString(undefined, {
-    month: "short",
+    month: "long",
     day: "numeric",
     year: date.getFullYear() === today.getFullYear() ? undefined : "numeric",
   });
@@ -144,12 +136,18 @@ function activityTone(kind: ActivityKind): string {
   }
 }
 
+function issueDisplayTitle(issue: Issue): string {
+  return issue.identifier ? `${issue.identifier} ${issue.title}` : issue.title;
+}
+
 export function OverviewPage() {
   const { t } = useT("overview");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const timeAgo = useTimeAgo();
   const viewTZ = useViewingTimezone();
+  const [projectFilter, setProjectFilter] = useState("all");
+  const [query, setQuery] = useState("");
 
   useCustomPricingStore((s) => s.pricings);
 
@@ -219,14 +217,13 @@ export function OverviewPage() {
         id: `issue:${issue.id}`,
         kind: "issue" as const,
         href: paths.issueDetail(issue.id),
-        title: issue.identifier
-          ? `${issue.identifier} ${issue.title}`
-          : issue.title,
+        title: issueDisplayTitle(issue),
         action,
         context: project?.title ?? null,
         timestamp: issue.updated_at,
         icon: ListTodo,
         node: <StatusIcon status={issue.status} className="size-3.5" />,
+        projectId: issue.project_id,
       };
     });
 
@@ -245,6 +242,7 @@ export function OverviewPage() {
       timestamp: project.updated_at,
       icon: FolderKanban,
       node: <ProjectIcon project={project} size="sm" />,
+      projectId: project.id,
     }));
 
     const agentItems: ActivityItem[] = agents.map((agent) => ({
@@ -260,16 +258,28 @@ export function OverviewPage() {
       context: t(($) => $.status.agent[agent.status]),
       timestamp: agent.archived_at ?? agent.updated_at,
       icon: Bot,
+      projectId: null,
     }));
 
     return [...issueItems, ...projectItems, ...agentItems]
-      .toSorted((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-      .slice(0, 18);
+      .toSorted((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [agents, issues, paths, projectById, projects, t]);
 
+  const filteredActivityItems = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return activityItems
+      .filter((item) => projectFilter === "all" || item.projectId === projectFilter)
+      .filter((item) => {
+        if (!normalizedQuery) return true;
+        const haystack = `${item.title} ${item.context ?? ""} ${item.action}`.toLowerCase();
+        return haystack.includes(normalizedQuery);
+      })
+      .slice(0, 32);
+  }, [activityItems, projectFilter, query]);
+
   const activityGroups = useMemo(() => {
-    const groups = new Map<string, { label: string; items: ActivityItem[] }>();
-    for (const item of activityItems) {
+    const groups = new Map<string, ActivityGroup>();
+    for (const item of filteredActivityItems) {
       const date = startOfLocalDay(new Date(item.timestamp));
       const key = date.toISOString();
       const label = dayLabel(
@@ -277,12 +287,12 @@ export function OverviewPage() {
         t(($) => $.dates.today),
         t(($) => $.dates.yesterday),
       );
-      const group = groups.get(key) ?? { label, items: [] };
+      const group = groups.get(key) ?? { key, label, items: [] };
       group.items.push(item);
       groups.set(key, group);
     }
     return Array.from(groups.values());
-  }, [activityItems, t]);
+  }, [filteredActivityItems, t]);
 
   const projectWrap = useMemo<ProjectWrapRow[]>(() => {
     const rows = new Map<string, ProjectWrapRow>();
@@ -331,8 +341,6 @@ export function OverviewPage() {
       .slice(0, 8);
   }, [issues, projectById, projects]);
 
-  const openIssueCount = issues.filter(isOpenIssue).length;
-  const workingAgentCount = agents.filter((agent) => agent.status === "working").length;
   const usageLoading =
     dailyQuery.isLoading || byAgentQuery.isLoading || runTimeQuery.isLoading;
   const activityLoading =
@@ -342,6 +350,7 @@ export function OverviewPage() {
     tokenTotals.output +
     tokenTotals.cacheRead +
     tokenTotals.cacheWrite;
+  const activeAgentCount = agents.filter((agent) => agent.status !== "offline").length;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -355,128 +364,68 @@ export function OverviewPage() {
       </PageHeader>
 
       <div className="min-h-0 flex-1 overflow-auto">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 p-4 md:p-6">
-          <div className="flex flex-col gap-1">
-            <h2 className="font-heading text-xl font-semibold leading-tight">
-              {t(($) => $.heading)}
-            </h2>
-            <p className="max-w-2xl text-sm text-muted-foreground">
-              {t(($) => $.subtitle)}
-            </p>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard
-              icon={TrendingUp}
-              label={t(($) => $.summary.cost_label, { days: USAGE_DAYS })}
-              value={
-                usageLoading ? (
-                  <Skeleton className="h-8 w-20" />
-                ) : (
-                  formatMoney(tokenTotals.cost)
-                )
-              }
-              hint={t(($) => $.summary.runtime_hint, {
-                duration: formatDuration(
-                  runtimeTotals.seconds,
-                  t(($) => $.duration.less_than_minute),
-                ),
-              })}
-              tone="brand"
-            />
-            <MetricCard
-              icon={Gauge}
-              label={t(($) => $.summary.tokens_label, { days: USAGE_DAYS })}
-              value={usageLoading ? <Skeleton className="h-8 w-20" /> : formatTokens(totalTokens)}
-              hint={t(($) => $.summary.tokens_hint, {
-                input: formatTokens(tokenTotals.input),
-                output: formatTokens(tokenTotals.output),
-              })}
-              tone="default"
-            />
-            <MetricCard
-              icon={CheckCircle2}
-              label={t(($) => $.summary.tasks_label, { days: USAGE_DAYS })}
-              value={
-                usageLoading ? (
-                  <Skeleton className="h-8 w-16" />
-                ) : (
-                  formatCount(runtimeTotals.taskCount || tokenTotals.taskCount)
-                )
-              }
-              hint={t(($) => $.summary.failed_hint, {
-                count: runtimeTotals.failedCount,
-              })}
-              tone="success"
-            />
-            <MetricCard
-              icon={ListTodo}
-              label={t(($) => $.summary.open_work_label)}
-              value={
-                activityLoading ? (
-                  <Skeleton className="h-8 w-16" />
-                ) : (
-                  formatCount(openIssueCount)
-                )
-              }
-              hint={t(($) => $.summary.open_work_hint, {
-                count: workingAgentCount,
-              })}
-              tone="warning"
-            />
-          </div>
-
-          <Tabs defaultValue="activity" className="gap-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <TabsList>
-                <TabsTrigger value="activity">
-                  <Activity className="size-3.5" />
-                  {t(($) => $.tabs.activity)}
-                </TabsTrigger>
-                <TabsTrigger value="wrapup">
-                  <FolderKanban className="size-3.5" />
-                  {t(($) => $.tabs.wrapup)}
-                </TabsTrigger>
-                <TabsTrigger value="usage">
-                  <BarChart3 className="size-3.5" />
-                  {t(($) => $.tabs.usage)}
-                </TabsTrigger>
-              </TabsList>
-              <div className="text-xs text-muted-foreground">
-                {t(($) => $.window_label, { days: USAGE_DAYS })}
-              </div>
+        <div className="mx-auto flex w-full max-w-5xl flex-col px-5 py-8 md:px-8 md:py-12">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h2 className="font-heading text-4xl font-semibold leading-none tracking-normal text-foreground md:text-6xl">
+                {t(($) => $.activity.title)}
+              </h2>
+              <p className="mt-3 max-w-2xl text-base text-muted-foreground">
+                {t(($) => $.subtitle)}
+              </p>
             </div>
-
-            <TabsContent value="activity" className="mt-0">
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.9fr)]">
-                <ActivityCard
-                  groups={activityGroups}
-                  loading={activityLoading}
-                  timeAgo={timeAgo}
-                  t={t}
-                />
-                <ProjectWrapCard
-                  rows={projectWrap}
-                  loading={projectsQuery.isLoading || issuesQuery.isLoading}
-                  timeAgo={timeAgo}
-                  paths={paths}
-                  t={t}
-                />
+            <div className="text-sm text-muted-foreground md:text-right">
+              <div className="font-medium text-foreground">
+                {usageLoading ? (
+                  <Skeleton className="inline-block h-4 w-40 align-middle" />
+                ) : (
+                  <>
+                    {formatMoney(tokenTotals.cost)}
+                    <span className="mx-1 text-muted-foreground">/</span>
+                    {formatTokens(totalTokens)}
+                    <span className="mx-1 text-muted-foreground">/</span>
+                    {formatDuration(
+                      runtimeTotals.seconds,
+                      t(($) => $.duration.less_than_minute),
+                    )}
+                  </>
+                )}
               </div>
+              <div>{t(($) => $.window_label, { days: USAGE_DAYS })}</div>
+            </div>
+          </div>
+
+          <Tabs defaultValue="activity" className="mt-6 gap-0">
+            <OverviewToolbar
+              projects={projects}
+              projectFilter={projectFilter}
+              onProjectFilterChange={setProjectFilter}
+              query={query}
+              onQueryChange={setQuery}
+              t={t}
+            />
+
+            <TabsContent value="activity" className="mt-10">
+              <ActivityTimeline
+                groups={activityGroups}
+                loading={activityLoading}
+                timeAgo={timeAgo}
+                activeAgentCount={activeAgentCount}
+                t={t}
+              />
             </TabsContent>
 
-            <TabsContent value="wrapup" className="mt-0">
-              <ProjectWrapCard
+            <TabsContent value="wrapup" className="mt-10">
+              <ProjectWrapList
                 rows={projectWrap}
                 loading={projectsQuery.isLoading || issuesQuery.isLoading}
                 timeAgo={timeAgo}
                 paths={paths}
                 t={t}
-                expanded
               />
             </TabsContent>
 
-            <TabsContent value="usage" className="mt-0">
+            <TabsContent value="usage" className="mt-10">
               <UsageSnapshot
                 rows={agentRows}
                 agentById={agentById}
@@ -493,91 +442,126 @@ export function OverviewPage() {
   );
 }
 
-function MetricCard({
-  icon: Icon,
-  label,
-  value,
-  hint,
-  tone,
-}: {
-  icon: IconComponent;
-  label: string;
-  value: ReactNode;
-  hint: ReactNode;
-  tone: "brand" | "success" | "warning" | "default";
-}) {
-  const toneClass =
-    tone === "brand"
-      ? "bg-brand/10 text-brand"
-      : tone === "success"
-        ? "bg-success/10 text-success"
-        : tone === "warning"
-          ? "bg-warning/10 text-warning"
-          : "bg-muted text-muted-foreground";
-  return (
-    <Card size="sm" className="rounded-lg">
-      <CardContent className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            {label}
-          </div>
-          <div className="mt-2 flex h-8 items-center text-2xl font-semibold leading-none tabular-nums">
-            {value}
-          </div>
-          <div className="mt-2 truncate text-xs text-muted-foreground">
-            {hint}
-          </div>
-        </div>
-        <div className={cn("flex size-9 shrink-0 items-center justify-center rounded-md", toneClass)}>
-          <Icon className="size-4" />
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ActivityCard({
-  groups,
-  loading,
-  timeAgo,
+function OverviewToolbar({
+  projects,
+  projectFilter,
+  onProjectFilterChange,
+  query,
+  onQueryChange,
   t,
 }: {
-  groups: { label: string; items: ActivityItem[] }[];
-  loading: boolean;
-  timeAgo: (dateStr: string) => string;
+  projects: Project[];
+  projectFilter: string;
+  onProjectFilterChange: (value: string) => void;
+  query: string;
+  onQueryChange: (value: string) => void;
   t: OverviewT;
 }) {
   return (
-    <Card className="rounded-lg">
-      <CardHeader>
-        <CardTitle>{t(($) => $.activity.title)}</CardTitle>
-        <CardDescription>{t(($) => $.activity.description)}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {loading ? (
-          <ListSkeleton />
-        ) : groups.length === 0 ? (
-          <EmptyState
-            icon={Clock3}
-            title={t(($) => $.activity.empty_title)}
-            body={t(($) => $.activity.empty_body)}
+    <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
+      <TabsList className="h-9 w-fit rounded-lg border bg-background p-0.5 shadow-xs">
+        <TabsTrigger value="activity" className="h-8 rounded-md px-3">
+          {t(($) => $.tabs.activity)}
+        </TabsTrigger>
+        <TabsTrigger value="wrapup" className="h-8 rounded-md px-3">
+          {t(($) => $.tabs.wrapup)}
+        </TabsTrigger>
+        <TabsTrigger value="usage" className="h-8 rounded-md px-3">
+          {t(($) => $.tabs.usage)}
+        </TabsTrigger>
+      </TabsList>
+
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="rounded-lg border bg-muted/50 px-3 py-2 text-muted-foreground">
+          {t(($) => $.filters.showing)}
+        </span>
+        <select
+          value={projectFilter}
+          onChange={(event) => onProjectFilterChange(event.target.value)}
+          className="h-9 max-w-56 rounded-lg border bg-background px-3 text-sm font-medium outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+        >
+          <option value="all">{t(($) => $.filters.all_projects)}</option>
+          {projects.map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.title}
+            </option>
+          ))}
+        </select>
+        <span className="text-muted-foreground">{t(($) => $.filters.by)}</span>
+        <button
+          type="button"
+          className="h-9 rounded-lg border bg-background px-3 text-sm font-medium"
+        >
+          {t(($) => $.filters.everyone)}
+        </button>
+        <label className="relative flex h-9 min-w-52 items-center">
+          <Search className="pointer-events-none absolute left-3 size-4 text-muted-foreground" />
+          <input
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder={t(($) => $.filters.filter_placeholder)}
+            className="h-full w-full rounded-lg border bg-background pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
           />
-        ) : (
-          groups.map((group) => (
-            <div key={group.label} className="space-y-2">
-              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {group.label}
-              </div>
-              <div className="divide-y rounded-lg border">
-                {group.items.map((item) => (
-                  <ActivityRow key={item.id} item={item} timeAgo={timeAgo} t={t} />
-                ))}
-              </div>
-            </div>
-          ))
-        )}
-      </CardContent>
-    </Card>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function ActivityTimeline({
+  groups,
+  loading,
+  timeAgo,
+  activeAgentCount,
+  t,
+}: {
+  groups: ActivityGroup[];
+  loading: boolean;
+  timeAgo: (dateStr: string) => string;
+  activeAgentCount: number;
+  t: OverviewT;
+}) {
+  if (loading) return <ListSkeleton />;
+  if (groups.length === 0) {
+    return (
+      <EmptyState
+        icon={Clock3}
+        title={t(($) => $.activity.empty_title)}
+        body={t(($) => $.activity.empty_body)}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-10">
+      {groups.map((group) => (
+        <section key={group.key} className="space-y-5">
+          <DayDivider
+            label={group.label}
+            sideText={t(($) => $.activity.active_agents, {
+              count: activeAgentCount,
+            })}
+          />
+          <div className="space-y-4">
+            {group.items.map((item) => (
+              <ActivityRow key={item.id} item={item} timeAgo={timeAgo} t={t} />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function DayDivider({ label, sideText }: { label: string; sideText: string }) {
+  return (
+    <div className="grid items-center gap-4 md:grid-cols-[auto_minmax(80px,1fr)_auto]">
+      <div className="w-fit rounded-md bg-foreground px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-background">
+        {label}
+      </div>
+      <div className="hidden h-px bg-border md:block" />
+      <div className="text-sm text-muted-foreground">{sideText}</div>
+    </div>
   );
 }
 
@@ -592,83 +576,84 @@ function ActivityRow({
 }) {
   const Icon = item.icon;
   return (
-    <div className="flex min-h-16 items-center gap-3 px-3 py-2.5">
-      <div className={cn("flex size-8 shrink-0 items-center justify-center rounded-md ring-1", activityTone(item.kind))}>
-        {item.node ?? <Icon className="size-4" />}
+    <div className="grid grid-cols-[4.75rem_2rem_minmax(0,1fr)] gap-3 md:grid-cols-[5.5rem_2rem_minmax(0,1fr)]">
+      <time className="pt-1 text-right text-sm text-muted-foreground">
+        {timeAgo(item.timestamp)}
+      </time>
+      <div className="relative flex justify-center">
+        <div className="absolute bottom-[-1.25rem] top-8 w-px bg-border" />
+        <div className={cn("relative z-10 flex size-7 items-center justify-center rounded-full ring-1", activityTone(item.kind))}>
+          {item.node ?? <Icon className="size-3.5" />}
+        </div>
       </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="text-sm text-muted-foreground">{item.action}</span>
+      <div className="min-w-0 pb-1">
+        <div className="text-base leading-snug text-foreground">
+          <span className="font-semibold">{item.action}</span>{" "}
           <AppLink
             href={item.href}
-            className="min-w-0 truncate text-sm font-medium text-foreground hover:underline"
+            className="font-semibold text-brand hover:underline"
           >
             {item.title}
           </AppLink>
-        </div>
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <span>{timeAgo(item.timestamp)}</span>
           {item.context && (
-            <>
-              <span className="text-muted-foreground/60">/</span>
-              <span className="truncate">{item.context}</span>
-            </>
+            <span className="text-muted-foreground"> - {item.context}</span>
           )}
         </div>
+        <div className="mt-1 text-sm text-muted-foreground">
+          {t(($) => $.activity.kind[item.kind])}
+        </div>
       </div>
-      <span className="hidden shrink-0 text-xs text-muted-foreground md:inline">
-        {t(($) => $.activity.kind[item.kind])}
-      </span>
     </div>
   );
 }
 
-function ProjectWrapCard({
+function ProjectWrapList({
   rows,
   loading,
   timeAgo,
   paths,
   t,
-  expanded = false,
 }: {
   rows: ProjectWrapRow[];
   loading: boolean;
   timeAgo: (dateStr: string) => string;
   paths: ReturnType<typeof useWorkspacePaths>;
   t: OverviewT;
-  expanded?: boolean;
 }) {
-  const visibleRows = expanded ? rows : rows.slice(0, 5);
+  if (loading) return <ListSkeleton />;
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={FolderKanban}
+        title={t(($) => $.wrapup.empty_title)}
+        body={t(($) => $.wrapup.empty_body)}
+      />
+    );
+  }
+
   return (
-    <Card className="rounded-lg">
-      <CardHeader>
-        <CardTitle>{t(($) => $.wrapup.title)}</CardTitle>
-        <CardDescription>{t(($) => $.wrapup.description)}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <ListSkeleton />
-        ) : visibleRows.length === 0 ? (
-          <EmptyState
-            icon={FolderKanban}
-            title={t(($) => $.wrapup.empty_title)}
-            body={t(($) => $.wrapup.empty_body)}
+    <div className="space-y-8">
+      <div>
+        <DayDivider
+          label={t(($) => $.wrapup.date_label)}
+          sideText={t(($) => $.wrapup.project_count, { count: rows.length })}
+        />
+        <h3 className="mt-8 font-heading text-3xl font-semibold leading-tight">
+          {t(($) => $.wrapup.section_title)}
+        </h3>
+      </div>
+      <div className="space-y-7">
+        {rows.map((row) => (
+          <ProjectWrapRowItem
+            key={row.id}
+            row={row}
+            timeAgo={timeAgo}
+            paths={paths}
+            t={t}
           />
-        ) : (
-          <div className="divide-y rounded-lg border">
-            {visibleRows.map((row) => (
-              <ProjectWrapRowItem
-                key={row.id}
-                row={row}
-                timeAgo={timeAgo}
-                paths={paths}
-                t={t}
-              />
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -688,59 +673,54 @@ function ProjectWrapRowItem({
     : row.issues.filter(isOpenIssue).length;
   const recentIssues = row.issues
     .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-    .slice(0, 3);
+    .slice(0, 5);
   const title = row.project?.title ?? t(($) => $.wrapup.no_project);
   const href = row.project ? paths.projectDetail(row.project.id) : paths.issues();
 
   return (
-    <div className="flex gap-3 px-3 py-3">
-      <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
-        {row.project ? (
-          <ProjectIcon project={row.project} size="sm" />
-        ) : (
-          <FolderKanban className="size-4 text-muted-foreground" />
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <AppLink href={href} className="truncate text-sm font-medium hover:underline">
-            {title}
-          </AppLink>
-          <span className="text-xs text-muted-foreground">
-            {timeAgo(row.latestAt)}
-          </span>
+    <section className="grid gap-3 md:grid-cols-[2rem_minmax(0,1fr)]">
+      <div className="hidden pt-1 md:flex md:justify-center">
+        <div className="flex size-7 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          {row.project ? (
+            <ProjectIcon project={row.project} size="sm" />
+          ) : (
+            <FolderKanban className="size-3.5" />
+          )}
         </div>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          <Badge variant="outline" className="rounded-md">
-            {t(($) => $.wrapup.open_issues, { count: openCount })}
-          </Badge>
-          <Badge variant="outline" className="rounded-md">
-            {t(($) => $.wrapup.done_issues, { count: row.doneCount })}
-          </Badge>
+      </div>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-3">
+          <AppLink
+            href={href}
+            className="inline-flex min-h-8 max-w-full items-center rounded-md bg-foreground px-3 py-1 text-base font-semibold leading-tight text-background hover:opacity-90"
+          >
+            <span className="truncate">{title}</span>
+          </AppLink>
+          <span className="text-sm text-muted-foreground">{timeAgo(row.latestAt)}</span>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground">
+          <span>{t(($) => $.wrapup.open_issues, { count: openCount })}</span>
+          <span>{t(($) => $.wrapup.done_issues, { count: row.doneCount })}</span>
           {row.resourceCount > 0 && (
-            <Badge variant="outline" className="rounded-md">
-              {t(($) => $.wrapup.resources, { count: row.resourceCount })}
-            </Badge>
+            <span>{t(($) => $.wrapup.resources, { count: row.resourceCount })}</span>
           )}
         </div>
         {recentIssues.length > 0 && (
-          <div className="mt-2 flex flex-col gap-1">
+          <div className="mt-4 space-y-2">
             {recentIssues.map((issue) => (
               <AppLink
                 key={issue.id}
                 href={paths.issueDetail(issue.id)}
-                className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                className="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-2 text-base leading-snug text-foreground hover:text-brand"
               >
-                <StatusIcon status={issue.status} className="size-3 shrink-0" />
-                <span className="truncate">
-                  {issue.identifier ? `${issue.identifier} ${issue.title}` : issue.title}
-                </span>
+                <StatusIcon status={issue.status} className="mt-1 size-4 shrink-0" />
+                <span className="min-w-0 truncate">{issueDisplayTitle(issue)}</span>
               </AppLink>
             ))}
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -761,89 +741,71 @@ function UsageSnapshot({
 }) {
   const totalTokens =
     totals.input + totals.output + totals.cacheRead + totals.cacheWrite;
-  return (
-    <Card className="rounded-lg">
-      <CardHeader>
-        <CardTitle>{t(($) => $.usage.title)}</CardTitle>
-        <CardDescription>
-          {t(($) => $.usage.description, { days: USAGE_DAYS })}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-3">
-          <UsageMiniStat
-            label={t(($) => $.usage.cost)}
-            value={loading ? <Skeleton className="h-6 w-16" /> : formatMoney(totals.cost)}
-          />
-          <UsageMiniStat
-            label={t(($) => $.usage.tokens)}
-            value={loading ? <Skeleton className="h-6 w-16" /> : formatTokens(totalTokens)}
-          />
-          <UsageMiniStat
-            label={t(($) => $.usage.run_time)}
-            value={
-              loading ? (
-                <Skeleton className="h-6 w-16" />
-              ) : (
-                formatDuration(
-                  runtimeTotals.seconds,
-                  t(($) => $.duration.less_than_minute),
-                )
-              )
-            }
-          />
-        </div>
+  if (loading) return <ListSkeleton />;
 
-        {loading ? (
-          <ListSkeleton />
-        ) : rows.length === 0 ? (
-          <EmptyState
-            icon={Bot}
-            title={t(($) => $.usage.empty_title)}
-            body={t(($) => $.usage.empty_body)}
-          />
-        ) : (
-          <div className="divide-y rounded-lg border">
-            {rows.slice(0, 8).map((row) => {
-              const agent = agentById.get(row.agentId);
-              return (
-                <div key={row.agentId} className="grid gap-3 px-3 py-3 md:grid-cols-[minmax(0,1fr)_120px_120px_120px] md:items-center">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                      <Bot className="size-4" />
+  return (
+    <div className="space-y-8">
+      <DayDivider
+        label={t(($) => $.usage.date_label, { days: USAGE_DAYS })}
+        sideText={t(($) => $.usage.agent_count, { count: rows.length })}
+      />
+      <div className="grid gap-4 border-y py-5 md:grid-cols-3">
+        <UsageBigStat label={t(($) => $.usage.cost)} value={formatMoney(totals.cost)} />
+        <UsageBigStat label={t(($) => $.usage.tokens)} value={formatTokens(totalTokens)} />
+        <UsageBigStat
+          label={t(($) => $.usage.run_time)}
+          value={formatDuration(
+            runtimeTotals.seconds,
+            t(($) => $.duration.less_than_minute),
+          )}
+        />
+      </div>
+
+      {rows.length === 0 ? (
+        <EmptyState
+          icon={Bot}
+          title={t(($) => $.usage.empty_title)}
+          body={t(($) => $.usage.empty_body)}
+        />
+      ) : (
+        <div className="divide-y border-y">
+          {rows.slice(0, 8).map((row) => {
+            const agent = agentById.get(row.agentId);
+            return (
+              <div key={row.agentId} className="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_120px_120px_120px] md:items-center">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                    <Bot className="size-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate text-base font-semibold">
+                      {agent?.name ?? t(($) => $.usage.unknown_agent)}
                     </div>
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">
-                        {agent?.name ?? t(($) => $.usage.unknown_agent)}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {t(($) => $.usage.tasks, { count: row.taskCount })}
-                      </div>
+                    <div className="text-sm text-muted-foreground">
+                      {t(($) => $.usage.tasks, { count: row.taskCount })}
                     </div>
                   </div>
-                  <UsageCell label={t(($) => $.usage.cost)} value={formatMoney(row.cost)} />
-                  <UsageCell label={t(($) => $.usage.tokens)} value={formatTokens(row.tokens)} />
-                  <UsageCell
-                    label={t(($) => $.usage.run_time)}
-                    value={formatDuration(row.seconds, t(($) => $.duration.less_than_minute))}
-                  />
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+                <UsageCell label={t(($) => $.usage.cost)} value={formatMoney(row.cost)} />
+                <UsageCell label={t(($) => $.usage.tokens)} value={formatTokens(row.tokens)} />
+                <UsageCell
+                  label={t(($) => $.usage.run_time)}
+                  value={formatDuration(row.seconds, t(($) => $.duration.less_than_minute))}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
-function UsageMiniStat({ label, value }: { label: string; value: ReactNode }) {
+function UsageBigStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border px-3 py-2">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 flex h-6 items-center text-lg font-semibold tabular-nums">
-        {value}
-      </div>
+    <div>
+      <div className="text-sm text-muted-foreground">{label}</div>
+      <div className="mt-1 text-3xl font-semibold tabular-nums">{value}</div>
     </div>
   );
 }
@@ -851,10 +813,10 @@ function UsageMiniStat({ label, value }: { label: string; value: ReactNode }) {
 function UsageCell({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <div className="text-[11px] uppercase tracking-wide text-muted-foreground md:hidden">
+      <div className="text-xs uppercase tracking-wide text-muted-foreground md:hidden">
         {label}
       </div>
-      <div className="text-sm font-medium tabular-nums md:text-right">{value}</div>
+      <div className="text-base font-semibold tabular-nums md:text-right">{value}</div>
     </div>
   );
 }
@@ -869,9 +831,9 @@ function EmptyState({
   body: string;
 }) {
   return (
-    <div className="flex min-h-40 flex-col items-center justify-center rounded-lg border border-dashed px-4 py-8 text-center">
+    <div className="flex min-h-48 flex-col items-center justify-center border-y px-4 py-10 text-center">
       <Icon className="size-5 text-muted-foreground" />
-      <div className="mt-3 text-sm font-medium">{title}</div>
+      <div className="mt-3 text-base font-semibold">{title}</div>
       <div className="mt-1 max-w-sm text-sm text-muted-foreground">{body}</div>
     </div>
   );
@@ -879,13 +841,14 @@ function EmptyState({
 
 function ListSkeleton() {
   return (
-    <div className="space-y-2">
+    <div className="space-y-4">
       {Array.from({ length: 5 }).map((_, index) => (
-        <div key={index} className="flex items-center gap-3 rounded-lg border px-3 py-3">
-          <Skeleton className="size-8 rounded-md" />
-          <div className="min-w-0 flex-1 space-y-2">
-            <Skeleton className="h-4 w-3/5" />
-            <Skeleton className="h-3 w-2/5" />
+        <div key={index} className="grid grid-cols-[5.5rem_2rem_minmax(0,1fr)] gap-3">
+          <Skeleton className="mt-1 h-4 w-14 justify-self-end" />
+          <Skeleton className="size-7 rounded-full" />
+          <div className="min-w-0 space-y-2">
+            <Skeleton className="h-5 w-3/5" />
+            <Skeleton className="h-4 w-2/5" />
           </div>
         </div>
       ))}
