@@ -51,21 +51,21 @@
     "toast_success": "{{identifier}}을(를) 하위 이슈로 추가했습니다"
   },
   "run_confirm": {
-    "title_assign": "실행을 시작할까요?",
-    "title_status": "실행을 시작할까요?",
-    "will_start_named": "{{name}}의 실행을 시작합니다.",
-    "will_start": "{{count}}개의 실행을 시작합니다.",
-    "nothing_assign": "할당됨 — 백로그라 실행이 시작되지 않습니다.",
-    "nothing_status": "실행이 시작되지 않습니다.",
+    "title_assign": "할당하고 시작할까요?",
+    "title_status": "지금 작업을 시작할까요?",
+    "will_start_named": "할당하면 {{name}}이(가) 이 이슈 작업을 바로 시작합니다.",
+    "will_start": "{{count}}개 이슈의 작업을 바로 시작합니다.",
+    "nothing_assign": "할당됨 — 백로그에서는 작업을 시작하지 않습니다.",
+    "nothing_status": "작업을 시작하지 않습니다.",
     "note_label": "인계 메모 (선택)",
-    "note_placeholder": "이 실행의 범위를 에이전트에게 알려주세요…",
-    "note_unsupported": "이 런타임은 너무 오래되어 메모를 받을 수 없습니다. 무시됩니다.",
+    "note_placeholder": "범위·핵심·건드리지 말 것 등을 한마디로…",
+    "note_unsupported": "상대 런타임이 오래되어 이 인계 메모를 읽지 못할 수 있습니다.",
     "start": "시작",
-    "dont_start": "지금 시작 안 함",
+    "dont_start": "아직 시작 안 함",
     "apply": "적용",
-    "toast_failed": "변경 적용에 실패했습니다",
-    "create_will_start": "생성 시 {{name}}을(를) 시작합니다.",
-    "create_parked": "할당됨 — 백로그에서는 시작되지 않습니다."
+    "toast_failed": "작업에 실패했습니다",
+    "create_will_start": "생성 후 {{name}}이(가) 바로 작업을 시작합니다.",
+    "create_parked": "할당됨 — 백로그에서는 작업을 시작하지 않습니다."
   },
   "create_squad": {
     "title": "스쿼드 만들기",

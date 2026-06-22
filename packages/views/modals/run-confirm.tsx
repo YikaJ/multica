@@ -3,13 +3,13 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import type { IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
@@ -33,7 +33,8 @@ interface RunConfirmData {
  * Pre-trigger confirmation for issue writes that may start agent runs
  * (MUL-3375 §4). Shows what the unified backend predicate says will start (via
  * the preview endpoint — never a frontend guess), lets the user attach a
- * handoff note (assign only) and choose "暂不启动", then applies the change.
+ * handoff note (assign only) and choose "暂不开始", then applies the change.
+ * Dismissing the dialog (X / Esc / click-outside) cancels without any write.
  * Shared by single assign (1 id) and batch assign / batch status (N ids).
  */
 export function RunConfirmModal({
@@ -115,14 +116,14 @@ export function RunConfirmModal({
   })();
 
   return (
-    <AlertDialog open onOpenChange={(v) => { if (!v && !submitting) onClose(); }}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>
+    <Dialog open onOpenChange={(v) => { if (!v && !submitting) onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
             {mode === "assign" ? t(($) => $.run_confirm.title_assign) : t(($) => $.run_confirm.title_status)}
-          </AlertDialogTitle>
-          <AlertDialogDescription>{headline}</AlertDialogDescription>
-        </AlertDialogHeader>
+          </DialogTitle>
+          <DialogDescription>{headline}</DialogDescription>
+        </DialogHeader>
 
         {canNote ? (
           <div className="grid gap-1.5">
@@ -144,7 +145,7 @@ export function RunConfirmModal({
           </div>
         ) : null}
 
-        <AlertDialogFooter>
+        <DialogFooter>
           {willStart ? (
             <>
               <Button type="button" variant="outline" disabled={submitting} onClick={() => submit(true)}>
@@ -159,8 +160,8 @@ export function RunConfirmModal({
               {t(($) => $.run_confirm.apply)}
             </Button>
           )}
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

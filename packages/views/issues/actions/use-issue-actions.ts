@@ -62,7 +62,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     (updates: Partial<UpdateIssueRequest>) => {
       if (!issueId) return;
       // Assigning to an agent/squad may start a run. Route through the
-      // pre-trigger confirm modal (preview + optional handoff note + "暂不启动"),
+      // pre-trigger confirm modal (preview + optional handoff note + "暂不开始"),
       // which applies the change itself — the four entry points share this one
       // backend-driven flow instead of guessing (MUL-3375). Every other field
       // change (status, priority, member assign, unassign) applies directly.

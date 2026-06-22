@@ -29,8 +29,8 @@ vi.mock("../i18n", () => ({
     // Resolve the accessor against a flat label map so assertions can target text.
     const labels = {
       run_confirm: {
-        title_assign: "Start a run?",
-        title_status: "Start runs?",
+        title_assign: "Assign and start?",
+        title_status: "Start working now?",
         will_start_named: "start Walt",
         will_start: "start many",
         nothing_assign: "no run (backlog)",
@@ -39,7 +39,7 @@ vi.mock("../i18n", () => ({
         note_placeholder: "scope...",
         note_unsupported: "runtime too old",
         start: "Start",
-        dont_start: "Don't start now",
+        dont_start: "Don't start yet",
         apply: "Apply",
         toast_failed: "failed",
         create_will_start: "create start",
@@ -51,13 +51,13 @@ vi.mock("../i18n", () => ({
 }));
 
 // Keep the ui primitives as light DOM so the logic is what's under test.
-vi.mock("@multica/ui/components/ui/alert-dialog", () => ({
-  AlertDialog: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AlertDialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AlertDialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AlertDialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AlertDialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AlertDialogDescription: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+vi.mock("@multica/ui/components/ui/dialog", () => ({
+  Dialog: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogDescription: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 vi.mock("@multica/ui/components/ui/button", () => ({
   Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
@@ -97,7 +97,7 @@ describe("RunConfirmModal", () => {
     expect(mockBatch).not.toHaveBeenCalled();
   });
 
-  it("'暂不启动' sends suppress_run and no handoff note", async () => {
+  it("'暂不开始' sends suppress_run and no handoff note", async () => {
     render(
       <RunConfirmModal
         onClose={vi.fn()}
@@ -105,7 +105,7 @@ describe("RunConfirmModal", () => {
       />,
     );
     fireEvent.change(screen.getByPlaceholderText("scope..."), { target: { value: "ignored" } });
-    fireEvent.click(screen.getByText("Don't start now"));
+    fireEvent.click(screen.getByText("Don't start yet"));
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
     const payload = mockUpdate.mock.calls[0]![0];
     expect(payload.suppress_run).toBe(true);

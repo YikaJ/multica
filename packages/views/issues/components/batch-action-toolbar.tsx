@@ -66,7 +66,7 @@ export function BatchActionToolbar({
 
   // Status and agent/squad assignment can fan out runs across the selection, so
   // route them through the pre-trigger confirm modal (aggregate "将启动 N 个" +
-  // collective handoff note for assign + 暂不启动). The modal applies the batch
+  // collective handoff note for assign + 暂不开始). The modal applies the batch
   // itself. Priority, member assign, and unassign never start a run — direct.
   const handleBatchStatus = (updates: Partial<UpdateIssueRequest>) => {
     if (!updates.status) return;
