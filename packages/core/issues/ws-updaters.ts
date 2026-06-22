@@ -59,9 +59,17 @@ export function onIssueUpdated(
   for (const [key, data] of listQueries) {
     if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issue.id, issue));
   }
-  if (issue.position !== undefined) {
-    qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
-  }
+  // The workspace board (issueKeys.list) is NOT filtered: an issue is always a
+  // member, so patchIssueInBuckets above is a complete surgical reconcile —
+  // cross-status move, same-column reorder, and field updates all land in the
+  // right bucket/slot. The old `if (position) invalidateQueries(list)` re-pulled
+  // the entire board on top of that, which is the full-list refetch that made a
+  // drag (local or echoed back over WS) flicker. It is pure redundancy here.
+  //
+  // myAll (My Issues / Project / actor lists) IS filtered: a change can move an
+  // issue in/out of the filter and the client cannot recompute that membership
+  // here, so that one is still invalidated. (Replacing this with client-side
+  // membership reconciliation is the separate follow-up — see issue thread.)
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });

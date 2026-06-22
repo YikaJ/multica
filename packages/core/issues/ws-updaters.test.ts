@@ -262,6 +262,41 @@ describe("project progress invalidation", () => {
   });
 });
 
+describe("onIssueUpdated — position move is surgical, not a list refetch", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient();
+  });
+
+  const issueA: Issue = { ...baseIssue, id: "issue-1", position: 0 };
+  const issueB: Issue = { ...baseIssue, id: "issue-2", position: 10 };
+
+  it("reorders the moved card in place and does NOT invalidate the workspace list", () => {
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), makeListCache(issueA, issueB));
+
+    // issue-1 moves below issue-2 (position 0 -> 20) — a remote/echoed drag.
+    onIssueUpdated(qc, WS_ID, { ...issueA, position: 20 });
+
+    const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
+    // Surgically reordered into its new slot: proof the patch alone suffices.
+    expect(list?.byStatus.todo?.issues.map((i) => i.id)).toEqual(["issue-2", "issue-1"]);
+    // The old redundant `position -> invalidate(list)` is gone — no full-board
+    // refetch on top of the surgical patch (that was the flicker source).
+    expect(qc.getQueryState(issueKeys.list(WS_ID))?.isInvalidated).toBe(false);
+  });
+
+  it("still invalidates the filtered myAll lists (membership can change there)", () => {
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), makeListCache(issueA, issueB));
+    qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), makeListCache(issueA));
+
+    onIssueUpdated(qc, WS_ID, { ...issueA, position: 20 });
+
+    expectInvalidated(qc, issueKeys.myAll(WS_ID));
+    expect(qc.getQueryState(issueKeys.list(WS_ID))?.isInvalidated).toBe(false);
+  });
+});
+
 describe("onIssueDeleted", () => {
   let qc: QueryClient;
 
