@@ -221,6 +221,8 @@
     "sidebar_tooltip": "サイドバーの開閉",
     "cmdf_toast_title": "ページ内検索は表示中の内容のみが対象です",
     "cmdf_toast_description": "タイムラインは仮想化されているため、画面外のコメントは ⌘F で見つかりません。アプリ全体の検索は近日提供予定です。",
+    "go_to_new_other": "新着コメント {{count}} 件",
+    "go_to_latest_aria": "最新のコメントへスクロール",
     "update_failed": "イシューを更新できませんでした",
     "link_copied": "リンクをコピーしました",
     "link_copy_failed": "リンクをコピーできませんでした",

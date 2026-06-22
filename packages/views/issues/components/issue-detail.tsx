@@ -77,6 +77,7 @@ import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
+import { useNewCommentsIndicator } from "../hooks/use-new-comments-indicator";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -1327,6 +1328,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     disabled: !!highlightCommentId,
   });
 
+  // "Go to new comments" affordance: floating control that scrolls to the
+  // latest comment, badged with the count of comments that arrived from
+  // others while the user was reading above the fold.
+  const {
+    count: newCommentsCount,
+    visible: showGoToNew,
+    sentinelRef: bottomSentinelRef,
+    scrollToBottom,
+  } = useNewCommentsIndicator({
+    scrollContainerEl,
+    timeline,
+    userId: user?.id,
+    ready: !!issue && !timelineLoading,
+    resetKey: `${wsId}:${id}`,
+  });
+
   if (loading) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
@@ -1737,7 +1754,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       : [];
 
   const detailContent = (
-    <div className="flex h-full min-w-0 flex-1 flex-col">
+    <div className="relative flex h-full min-w-0 flex-1 flex-col">
         <BreadcrumbHeader
           segments={breadcrumbSegments}
           leaf={
@@ -2139,6 +2156,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               )
             )}
 
+            {/* Sentinel just below the timeline: when it enters the scroll
+                viewport the latest comment is in view, so the "go to new"
+                control hides and the new-comment count resets. */}
+            <div ref={bottomSentinelRef} aria-hidden className="h-px w-full" />
+
             {/* Bottom comment input — no avatar, full width */}
             <div className="mt-4">
               {/* key={id}: web's /issues/[id] route doesn't remount on
@@ -2151,6 +2173,23 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>
         </div>
         </div>
+        {showGoToNew && (
+          <Button
+            type="button"
+            size={newCommentsCount > 0 ? "sm" : "icon-sm"}
+            variant="outline"
+            onClick={scrollToBottom}
+            aria-label={t(($) => $.detail.go_to_latest_aria)}
+            className="absolute bottom-4 right-4 z-20 rounded-full shadow-md"
+          >
+            <ChevronDown />
+            {newCommentsCount > 0 && (
+              <span className="tabular-nums">
+                {t(($) => $.detail.go_to_new, { count: newCommentsCount })}
+              </span>
+            )}
+          </Button>
+        )}
       </div>
   );
 

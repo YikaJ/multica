@@ -60,3 +60,20 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 if (typeof document.elementFromPoint !== "function") {
   document.elementFromPoint = () => null;
 }
+
+// jsdom doesn't provide IntersectionObserver; components that observe
+// viewport intersection (e.g. the issue-detail "go to new comments" sentinel)
+// rely on it. Stub it as a no-op so they render in tests.
+if (typeof globalThis.IntersectionObserver === "undefined") {
+  globalThis.IntersectionObserver = class IntersectionObserver {
+    readonly root = null;
+    readonly rootMargin = "";
+    readonly thresholds: ReadonlyArray<number> = [];
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+    takeRecords() {
+      return [];
+    }
+  } as unknown as typeof IntersectionObserver;
+}
