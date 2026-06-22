@@ -21,9 +21,13 @@
 --     copies the data forward.
 --
 -- app_secret_encrypted is BYTEA; it is carried into the JSONB config as a
--- base64 string (encode(...,'base64')). Go's encoding/json decodes a
--- base64 string straight back into a []byte field, so the round-trip is
--- symmetric and the ciphertext is never stored in plaintext.
+-- base64 string. PostgreSQL's encode(...,'base64') MIME-wraps the output
+-- with a newline every 76 chars, and a secretbox-sealed app secret (~72
+-- bytes) exceeds that, so we strip the newlines: Go's encoding/json decodes
+-- a base64 string into a []byte field with base64.StdEncoding, which rejects
+-- embedded newlines. Stripping keeps the bytea -> JSON -> []byte round-trip
+-- symmetric (the Go writer emits unwrapped base64 too) and the ciphertext is
+-- never stored in plaintext.
 
 -- =====================
 -- channel_installation
@@ -78,7 +82,7 @@ SELECT
     id, workspace_id, agent_id, 'feishu',
     jsonb_strip_nulls(jsonb_build_object(
         'app_id',               app_id,
-        'app_secret_encrypted', encode(app_secret_encrypted, 'base64'),
+        'app_secret_encrypted', replace(encode(app_secret_encrypted, 'base64'), E'\n', ''),
         'tenant_key',           tenant_key,
         'bot_open_id',          bot_open_id,
         'bot_union_id',         bot_union_id,
