@@ -20,24 +20,44 @@
 --     ship green on its own. This migration only ADDS channel_* and
 --     copies the data forward.
 --
---   * ROLLOUT — Lark hub cutover required. This backfill is a one-time copy.
---     After it runs, new code reads/writes channel_* while any pre-cutover
---     (v0.3.x) code still reads/writes lark_*: the two table sets never
---     cross-deduplicate, and each side would claim the same Feishu bot's WS
---     lease on its own table and open a duplicate connection, double-processing
---     inbound events (duplicate messages / /issue / runs). So the old and new
---     Lark hubs MUST NOT run concurrently. The rollout uses the
---     MULTICA_LARK_HUB_DISABLED switch (cmd/server/main.go) to keep the hubs
---     from overlapping WITHOUT taking the whole API down:
---       1. Ship the new release with MULTICA_LARK_HUB_DISABLED=true — new pods
---          serve HTTP but run no hub; old pods keep their lark_* hub until k8s
---          drains them, so only one hub is ever live.
---       2. Once old pods are gone, run this migration (no hub is claiming).
---       3. Flip the switch off — the new hub comes up on channel_*.
---     Only the Feishu bot is briefly unavailable (the window in 2-3); the API
---     stays up throughout. Rollback to a pre-cutover build is not lossless once
---     the new hub has written Feishu state into channel_*. See the PR
---     "Deployment / rollout" section for the full runbook.
+--   * ROLLOUT. This backfill is a one-time copy and the Lark hub is an
+--     in-process goroutine, so a cutover has TWO independent invariants:
+--       (a) channel_* must exist BEFORE any new (channel_*) build serves the
+--           HTTP paths that touch it — installation list/install/revoke,
+--           chat-session delete, member revoke — or those paths 500.
+--       (b) the OLD (lark_*) hub and the NEW (channel_*) hub must never run at
+--           once: each would claim the same Feishu bot's WS lease on its own
+--           table and open a duplicate connection, double-processing inbound
+--           events (duplicate messages / /issue / runs). The two table sets
+--           never cross-deduplicate.
+--
+--     SELF-HOST (Docker Compose / Helm) satisfies both automatically and needs
+--     NO flags or manual steps. The backend entrypoint runs `migrate up`
+--     before the server starts, so channel_* exists before the new build
+--     serves (a); the deployment is single-replica `Recreate`, so the old pod
+--     (and its hub) fully stops before the new pod starts (b). A normal
+--     version upgrade is a clean cutover. Only a self-host re-tuned to
+--     multi-replica RollingUpdate needs the prd procedure below.
+--
+--     PRD (rolling multica-api, maxUnavailable:0) overlaps old and new pods,
+--     so use the MULTICA_LARK_HUB_DISABLED switch (cmd/server/main.go) to park
+--     a hub while the API stays up. For a clean, drift-free cutover:
+--       1. Pre-release the hub-park switch on the CURRENT build and set
+--          MULTICA_LARK_HUB_DISABLED=true. The old hub stops everywhere (no
+--          more lease/dedup/binding/thread writes to lark_*); the API stays up.
+--       2. Run this migration — a clean snapshot, no live hub writing lark_*.
+--       3. Deploy the channel build with the switch still ON. channel_* already
+--          exists (step 2), so the new HTTP paths never 500, and the new hub
+--          stays parked while old pods drain.
+--       4. Flip MULTICA_LARK_HUB_DISABLED off — the new hub comes up on
+--          channel_*. Only the Feishu bot is unavailable across steps 1-4; the
+--          API stays up throughout.
+--     The earlier "ship new code, THEN migrate after pods drain" order is
+--     wrong: it serves channel_* HTTP before channel_* exists, violating (a).
+--     Rollback to a pre-cutover build is not lossless once the new hub has
+--     written Feishu state into channel_*. See the PR "Deployment / rollout"
+--     section for the full runbook (incl. a lower-effort single-deploy variant
+--     that trades a small transient drift for one fewer release).
 --
 -- app_secret_encrypted is BYTEA; it is carried into the JSONB config as a
 -- base64 string. PostgreSQL's encode(...,'base64') MIME-wraps the output
