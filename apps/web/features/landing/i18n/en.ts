@@ -296,11 +296,11 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.28",
         date: "2026-06-23",
-        title: "Staged Issue Workflows and Clearer Agent Handoffs",
+        title: "Staged Sub-Issues and Qoder Runtime Support",
         changes: [],
         features: [
           "Sub-Issues can now be organized into stages, so parallel work moves forward together and the parent Issue is updated only when a stage is complete",
-          "Before an assignment starts an agent, Multica can preview what will happen and let you add a handoff note for the next run",
+          "Assigning or batch-updating an Issue now confirms upfront whether it will start an agent — and which one — so you can apply the change without launching a run; when a run does start, you can attach a handoff note that the agent receives as context for that run",
           "Qoder is now available as an agent provider, including model discovery and provider branding",
           "Custom runtimes can include fixed launch arguments, with clearer feedback when a saved runtime cannot register",
         ],
