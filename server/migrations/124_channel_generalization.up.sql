@@ -20,17 +20,24 @@
 --     ship green on its own. This migration only ADDS channel_* and
 --     copies the data forward.
 --
---   * ROLLOUT — NON-ROLLING CUTOVER REQUIRED. This backfill is a one-time
---     copy. After it runs, new code reads/writes channel_* while any
---     pre-cutover (v0.3.x) code still reads/writes lark_*: the two table
---     sets never cross-deduplicate, and each side would claim the same
---     Feishu bot's WS lease on its own table and open a duplicate
---     connection, double-processing inbound events (duplicate messages /
---     /issue / runs). So old and new backend hub processes MUST NOT run
---     concurrently against this schema — stop the old hub before applying
---     this migration and starting the new code (recreate, not rolling).
---     Rollback to a pre-cutover build is not lossless once the new code has
---     written Feishu state into channel_*.
+--   * ROLLOUT — Lark hub cutover required. This backfill is a one-time copy.
+--     After it runs, new code reads/writes channel_* while any pre-cutover
+--     (v0.3.x) code still reads/writes lark_*: the two table sets never
+--     cross-deduplicate, and each side would claim the same Feishu bot's WS
+--     lease on its own table and open a duplicate connection, double-processing
+--     inbound events (duplicate messages / /issue / runs). So the old and new
+--     Lark hubs MUST NOT run concurrently. The rollout uses the
+--     MULTICA_LARK_HUB_DISABLED switch (cmd/server/main.go) to keep the hubs
+--     from overlapping WITHOUT taking the whole API down:
+--       1. Ship the new release with MULTICA_LARK_HUB_DISABLED=true — new pods
+--          serve HTTP but run no hub; old pods keep their lark_* hub until k8s
+--          drains them, so only one hub is ever live.
+--       2. Once old pods are gone, run this migration (no hub is claiming).
+--       3. Flip the switch off — the new hub comes up on channel_*.
+--     Only the Feishu bot is briefly unavailable (the window in 2-3); the API
+--     stays up throughout. Rollback to a pre-cutover build is not lossless once
+--     the new hub has written Feishu state into channel_*. See the PR
+--     "Deployment / rollout" section for the full runbook.
 --
 -- app_secret_encrypted is BYTEA; it is carried into the JSONB config as a
 -- base64 string. PostgreSQL's encode(...,'base64') MIME-wraps the output
