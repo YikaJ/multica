@@ -139,26 +139,9 @@ VALUES ($1, $2, 'slack', 'oc_scope_slack', 'om_scope_slack', 'pending')
 		t.Fatalf("ListLarkInstallationsByWorkspace: got apps=%v, want exactly [%s]", apps, feishuApp)
 	}
 
-	// list-active (hub boot): includes the Feishu install, never the Slack one
-	active, err := store.ListActiveLarkInstallations(ctx)
-	if err != nil {
-		t.Fatalf("ListActiveLarkInstallations: %v", err)
-	}
-	var sawFeishu, sawSlack bool
-	for _, r := range active {
-		switch r.AppID {
-		case feishuApp:
-			sawFeishu = true
-		case slackApp:
-			sawSlack = true
-		}
-	}
-	if !sawFeishu {
-		t.Fatal("ListActiveLarkInstallations: missing the active Feishu installation")
-	}
-	if sawSlack {
-		t.Fatal("ListActiveLarkInstallations: returned a Slack installation (hub would supervise another channel)")
-	}
+	// (ListActiveLarkInstallations channel-type + live workspace/agent scoping
+	// is covered by TestListActiveLarkInstallations_SkipsOrphans in the handler
+	// package, which has real workspace/agent fixtures the JOIN now requires.)
 
 	// --- outbound reads: a Slack binding/card must not be seen as Feishu ---
 

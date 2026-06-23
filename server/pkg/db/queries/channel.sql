@@ -75,10 +75,21 @@ ORDER BY created_at ASC;
 -- Boot path for a per-channel-type inbound hub: every active installation of
 -- the given channel_type, so a hub claims leases and opens connections only
 -- for its own platform and never supervises another channel's installation.
-SELECT * FROM channel_installation
-WHERE status = 'active'
-  AND channel_type = sqlc.arg('channel_type')
-ORDER BY created_at ASC;
+--
+-- The JOINs require the owning workspace and agent rows to still exist.
+-- channel_installation has no FK (MUL-3515 §4), so unlike the old
+-- lark_installation (which cascaded away on workspace/agent deletion) an
+-- installation can be orphaned when its workspace is deleted or its agent is
+-- hard-deleted (e.g. runtime teardown). Without this guard the hub would keep
+-- opening a WebSocket for a bot whose workspace/agent is gone. The JOIN matches
+-- the old ON DELETE CASCADE semantics: it filters on row existence, not agent
+-- archival, so an archived-but-present agent's installation is still listed.
+SELECT ci.* FROM channel_installation ci
+JOIN workspace w ON w.id = ci.workspace_id
+JOIN agent a ON a.id = ci.agent_id
+WHERE ci.status = 'active'
+  AND ci.channel_type = sqlc.arg('channel_type')
+ORDER BY ci.created_at ASC;
 
 -- name: SetChannelInstallationStatus :exec
 UPDATE channel_installation
