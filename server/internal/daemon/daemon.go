@@ -3086,6 +3086,84 @@ func agentPromptLength(provider, prompt, systemPrompt string) (bytes int, chars 
 	return len(combined), utf8.RuneCountInString(combined)
 }
 
+type runtimeBriefSectionChars struct {
+	Workflow          int
+	Core              int
+	Identity          int
+	Metadata          int
+	CommentFormatting int
+	Mentions          int
+	Output            int
+	Skills            int
+	Other             int
+}
+
+func countRuntimeBriefSectionChars(brief string) runtimeBriefSectionChars {
+	var counts runtimeBriefSectionChars
+	category := "other"
+	for _, line := range strings.SplitAfter(brief, "\n") {
+		if next, ok := runtimeBriefHeadingCategory(strings.TrimSpace(line)); ok {
+			category = next
+		}
+		chars := utf8.RuneCountInString(line)
+		switch category {
+		case "workflow":
+			counts.Workflow += chars
+		case "core":
+			counts.Core += chars
+		case "identity":
+			counts.Identity += chars
+		case "metadata":
+			counts.Metadata += chars
+		case "comment_formatting":
+			counts.CommentFormatting += chars
+		case "mentions":
+			counts.Mentions += chars
+		case "output":
+			counts.Output += chars
+		case "skills":
+			counts.Skills += chars
+		default:
+			counts.Other += chars
+		}
+	}
+	return counts
+}
+
+func runtimeBriefHeadingCategory(heading string) (category string, ok bool) {
+	switch heading {
+	case "## Agent Identity":
+		return "identity", true
+	case "## Available Commands", "### Core", "### Squad maintenance":
+		return "core", true
+	case "## Issue Metadata":
+		return "metadata", true
+	case "## Comment Formatting":
+		return "comment_formatting", true
+	case "### Workflow":
+		return "workflow", true
+	case "## Mentions", "### When NOT to use a mention link", "### When a mention IS appropriate":
+		return "mentions", true
+	case "## Output":
+		return "output", true
+	case "## Skills":
+		return "skills", true
+	case "## Background Task Safety",
+		"## Requesting User",
+		"## Task Initiator",
+		"## Workspace Context",
+		"## Repositories",
+		"## Project Context",
+		"## Instruction Precedence",
+		"## Sub-issue Creation",
+		"## Attachments",
+		"## Important: Always Use the `multica` CLI":
+		return "other", true
+	default:
+		return "", false
+	}
+}
+
 func inlineSystemPromptSeparator(provider string) string {
 	switch provider {
 	case "kiro", "kimi":
@@ -3551,6 +3629,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	agentPromptBytes, agentPromptChars := agentPromptLength(provider, prompt, execOpts.SystemPrompt)
+	briefSections := countRuntimeBriefSectionChars(runtimeBrief)
 	taskLog.Info("agent prompt prepared",
 		"provider", provider,
 		"model", model,
@@ -3558,6 +3637,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"prompt_chars", utf8.RuneCountInString(prompt),
 		"runtime_brief_bytes", len(runtimeBrief),
 		"runtime_brief_chars", utf8.RuneCountInString(runtimeBrief),
+		"runtime_brief_workflow_chars", briefSections.Workflow,
+		"runtime_brief_core_chars", briefSections.Core,
+		"runtime_brief_identity_chars", briefSections.Identity,
+		"runtime_brief_metadata_chars", briefSections.Metadata,
+		"runtime_brief_comment_formatting_chars", briefSections.CommentFormatting,
+		"runtime_brief_mentions_chars", briefSections.Mentions,
+		"runtime_brief_output_chars", briefSections.Output,
+		"runtime_brief_skills_chars", briefSections.Skills,
+		"runtime_brief_other_chars", briefSections.Other,
 		"inline_system_prompt", execOpts.SystemPrompt != "",
 		"system_prompt_bytes", len(execOpts.SystemPrompt),
 		"system_prompt_chars", utf8.RuneCountInString(execOpts.SystemPrompt),

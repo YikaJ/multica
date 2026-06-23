@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -341,6 +342,59 @@ func TestAgentPromptLength(t *testing.T) {
 				t.Fatalf("chars = %d, want %d", gotChars, tc.wantChars)
 			}
 		})
+	}
+}
+
+func TestCountRuntimeBriefSectionChars(t *testing.T) {
+	t.Parallel()
+
+	otherPrefix := "<!-- BEGIN MULTICA-RUNTIME -->\n# Multica Agent Runtime\n\n"
+	identity := "## Agent Identity\n**You are: GPT-Boy**\n## 用户自定义标题\n### PR Review\n中文身份\n"
+	core := "## Available Commands\nintro\n### Core\ncore command\n### Squad maintenance\nsquad command\n"
+	commentFormatting := "## Comment Formatting\nformat body\n"
+	metadata := "## Issue Metadata\nmetadata body\n"
+	workflow := "### Workflow\nworkflow body\n"
+	skills := "## Skills\n- skill\n"
+	mentions := "## Mentions\nmentions intro\n### When NOT to use a mention link\nno loop\n### When a mention IS appropriate\nescalate\n"
+	output := "## Output\noutput body\n"
+	otherSuffix := "## Attachments\nattach body\n"
+
+	brief := otherPrefix + identity + core + commentFormatting + metadata + workflow + skills + mentions + output + otherSuffix
+	got := countRuntimeBriefSectionChars(brief)
+
+	if got.Identity != utf8.RuneCountInString(identity) {
+		t.Fatalf("identity chars = %d, want %d", got.Identity, utf8.RuneCountInString(identity))
+	}
+	if got.Core != utf8.RuneCountInString(core) {
+		t.Fatalf("core chars = %d, want %d", got.Core, utf8.RuneCountInString(core))
+	}
+	if got.CommentFormatting != utf8.RuneCountInString(commentFormatting) {
+		t.Fatalf("comment formatting chars = %d, want %d", got.CommentFormatting, utf8.RuneCountInString(commentFormatting))
+	}
+	if got.Metadata != utf8.RuneCountInString(metadata) {
+		t.Fatalf("metadata chars = %d, want %d", got.Metadata, utf8.RuneCountInString(metadata))
+	}
+	if got.Workflow != utf8.RuneCountInString(workflow) {
+		t.Fatalf("workflow chars = %d, want %d", got.Workflow, utf8.RuneCountInString(workflow))
+	}
+	if got.Skills != utf8.RuneCountInString(skills) {
+		t.Fatalf("skills chars = %d, want %d", got.Skills, utf8.RuneCountInString(skills))
+	}
+	if got.Mentions != utf8.RuneCountInString(mentions) {
+		t.Fatalf("mentions chars = %d, want %d", got.Mentions, utf8.RuneCountInString(mentions))
+	}
+	if got.Output != utf8.RuneCountInString(output) {
+		t.Fatalf("output chars = %d, want %d", got.Output, utf8.RuneCountInString(output))
+	}
+	wantOther := utf8.RuneCountInString(otherPrefix + otherSuffix)
+	if got.Other != wantOther {
+		t.Fatalf("other chars = %d, want %d", got.Other, wantOther)
+	}
+
+	total := got.Workflow + got.Core + got.Identity + got.Metadata + got.CommentFormatting +
+		got.Mentions + got.Output + got.Skills + got.Other
+	if total != utf8.RuneCountInString(brief) {
+		t.Fatalf("section total chars = %d, want %d", total, utf8.RuneCountInString(brief))
 	}
 }
 
