@@ -1,5 +1,5 @@
 -- Platform-agnostic inbound channel queries (MUL-3515). These operate on
--- the channel_* tables created in migration 123. Each installation carries
+-- the channel_* tables created in migration 124. Each installation carries
 -- a `channel_type` discriminator and a JSONB `config` blob for
 -- platform-specific identifiers/credentials; the cross-platform columns
 -- stay flat. The Go layer owns building/parsing config — these queries
@@ -209,7 +209,7 @@ WHERE chat_session_id = $1;
 -- claim is acquired (fresh insert, or stale-reclaim of an in-flight claim
 -- older than 60s); returns no rows when terminal (processed) or actively
 -- in-flight. Every claim mints a fresh claim_token; Mark/Release are
--- fenced on it. See the table comment in migration 123 / the lark
+-- fenced on it. See the table comment in migration 124 / the lark
 -- predecessor for the full invariant set.
 INSERT INTO channel_inbound_message_dedup (installation_id, message_id, claim_token)
 VALUES ($1, $2, gen_random_uuid())

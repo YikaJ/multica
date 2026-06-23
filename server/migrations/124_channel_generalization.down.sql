@@ -1,4 +1,4 @@
--- Reverse 123_channel_generalization.up.sql. The lark_* tables were left
+-- Reverse 124_channel_generalization.up.sql. The lark_* tables were left
 -- in place by the up migration, so rolling back only needs to drop the
 -- channel_* tables that were added.
 DROP TABLE IF EXISTS channel_binding_token;
