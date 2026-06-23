@@ -38,7 +38,7 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			out := buildMetaSkillContent("claude", tc.ctx)
+			out, _ := buildMetaSkillContent("claude", tc.ctx)
 
 			if !strings.Contains(out, "## Sub-issue Creation") {
 				t.Fatalf("expected Sub-issue Creation section in %s brief", tc.name)
@@ -85,7 +85,7 @@ func TestBriefHasNoParentNotificationGuidance(t *testing.T) {
 	}
 	for _, ctx := range cases {
 		ctx := ctx
-		out := buildMetaSkillContent("claude", ctx)
+		out, _ := buildMetaSkillContent("claude", ctx)
 
 		// The pre-MUL-2538 phrasing instructed the agent to compose a
 		// parent comment by hand — including a hardcoded `MUL-` prefix
@@ -150,7 +150,7 @@ func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
 		IssueID:          "55555555-6666-7777-8888-999999999999",
 		TriggerCommentID: "66666666-7777-8888-9999-aaaaaaaaaaaa",
 	}
-	out := buildMetaSkillContent("claude", ctx)
+	out, _ := buildMetaSkillContent("claude", ctx)
 
 	if strings.Contains(out, "`multica issue status <this-issue-id> in_review`") {
 		t.Errorf("comment-triggered brief must not contain a placeholder `<this-issue-id> in_review` flip — that conflicts with the comment-triggered \"do not change status unless asked\" rule")
@@ -177,7 +177,7 @@ func TestCommentTriggeredBriefCarriesNewCommentsHint(t *testing.T) {
 		NewCommentCount:  4,
 		NewCommentsSince: since,
 	}
-	out := buildMetaSkillContent("claude", ctx)
+	out, _ := buildMetaSkillContent("claude", ctx)
 
 	// Issue-wide count.
 	if !strings.Contains(out, "4 new comment(s) on this issue since your last run") {
@@ -216,7 +216,7 @@ func TestCommentTriggeredBriefColdStartThreadRead(t *testing.T) {
 		NewCommentCount:  0,
 		NewCommentsSince: "",
 	}
-	out := buildMetaSkillContent("claude", ctx)
+	out, _ := buildMetaSkillContent("claude", ctx)
 	if strings.Contains(out, "new comment(s) since your last run") {
 		t.Errorf("no since-delta hint should render on cold start, got:\n%s", out)
 	}
@@ -240,7 +240,7 @@ func TestCommentTriggeredBriefResumedNoDeltaSkipsDefaultThreadRead(t *testing.T)
 		NewCommentCount:     0,
 		NewCommentsSince:    "",
 	}
-	out := buildMetaSkillContent("claude", ctx)
+	out, _ := buildMetaSkillContent("claude", ctx)
 
 	for _, want := range []string{
 		"triggering comment is already included above",
@@ -270,7 +270,7 @@ func TestAssignmentTriggeredProtocolHonorsAgentIdentity(t *testing.T) {
 	t.Parallel()
 	const issueID = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
 	ctx := TaskContextForEnv{IssueID: issueID}
-	out := buildMetaSkillContent("claude", ctx)
+	out, _ := buildMetaSkillContent("claude", ctx)
 
 	for _, want := range []string{
 		"## Instruction Precedence",
@@ -329,7 +329,7 @@ func TestInstructionPrecedenceOnlyAppliesToAssignmentWorkflow(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			out := buildMetaSkillContent("claude", tc.ctx)
+			out, _ := buildMetaSkillContent("claude", tc.ctx)
 			for _, banned := range []string{
 				"## Instruction Precedence",
 				"assignment workflow below",
@@ -346,7 +346,7 @@ func TestInstructionPrecedenceOnlyAppliesToAssignmentWorkflow(t *testing.T) {
 func TestChatOutputDoesNotRequireIssueComment(t *testing.T) {
 	t.Parallel()
 
-	out := buildMetaSkillContent("claude", TaskContextForEnv{ChatSessionID: "chat-1"})
+	out, _ := buildMetaSkillContent("claude", TaskContextForEnv{ChatSessionID: "chat-1"})
 
 	for _, want := range []string{
 		"This is a chat session",
@@ -378,7 +378,7 @@ func TestSubIssueCreationSectionIsUnconditional(t *testing.T) {
 	ctx := TaskContextForEnv{
 		IssueID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
 	}
-	out := buildMetaSkillContent("claude", ctx)
+	out, _ := buildMetaSkillContent("claude", ctx)
 
 	const header = "## Sub-issue Creation"
 	start := strings.Index(out, header)
@@ -452,7 +452,7 @@ func TestWorkspaceContextRenderedAcrossTaskKinds(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			out := buildMetaSkillContent("claude", tc.ctx)
+			out, _ := buildMetaSkillContent("claude", tc.ctx)
 
 			if !strings.Contains(out, "## Workspace Context") {
 				t.Fatalf("[%s] expected `## Workspace Context` heading", tc.name)
@@ -496,7 +496,7 @@ func TestWorkspaceContextHeadingSkippedWhenEmpty(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			out := buildMetaSkillContent("claude", tc.ctx)
+			out, _ := buildMetaSkillContent("claude", tc.ctx)
 			if strings.Contains(out, "## Workspace Context") {
 				t.Errorf("[%s] empty workspace context must NOT emit the heading", tc.name)
 			}
@@ -527,7 +527,7 @@ func TestSubIssueCreationSectionSkippedForNonIssueModes(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			out := buildMetaSkillContent("claude", tc.ctx)
+			out, _ := buildMetaSkillContent("claude", tc.ctx)
 			if strings.Contains(out, "## Sub-issue Creation") {
 				t.Errorf("%s mode must NOT emit the Sub-issue Creation section", tc.name)
 			}

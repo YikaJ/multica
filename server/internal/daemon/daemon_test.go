@@ -345,88 +345,142 @@ func TestAgentPromptLength(t *testing.T) {
 	}
 }
 
-func TestCountRuntimeBriefSectionChars(t *testing.T) {
+func TestInjectRuntimeConfigWithSizesAttributesChineseIdentityBody(t *testing.T) {
 	t.Parallel()
 
-	header := "<!-- BEGIN MULTICA-RUNTIME -->\n# Multica Agent Runtime\n\n"
-	misc := "## Background Task Safety\nbackground body\n## Requesting User\nrequesting user body\n## Workspace Context\nworkspace body\n## Project Context\nproject body\n## Instruction Precedence\nprecedence body\n"
-	identity := "## Agent Identity\n\n**You are: GPT-Boy** (ID: `agent-1`)\n\n"
-	identityBody := "## 用户自定义标题\n### PR Review\n中文身份\n"
-	taskInitiator := "## Task Initiator\ninitiator body\n"
-	core := "## Available Commands\nintro\n### Core\ncore command\n### Squad maintenance\nsquad command\n"
-	commentFormatting := "## Comment Formatting\nformat body\n"
-	repositories := "## Repositories\nrepo body\n"
-	metadata := "## Issue Metadata\nmetadata body\n"
-	workflow := "### Workflow\nworkflow body\n"
-	subIssue := "## Sub-issue Creation\nsub issue body\n"
-	skills := "## Skills\n- skill\n"
-	mentions := "## Mentions\nmentions intro\n### When NOT to use a mention link\nno loop\n### When a mention IS appropriate\nescalate\n"
-	attachments := "## Attachments\nattach body\n"
-	alwaysUseCLI := "## Important: Always Use the `multica` CLI\ncli body\n"
-	output := "## Output\noutput body\n"
-
-	brief := header + misc + identity + identityBody + taskInitiator + core + commentFormatting +
-		repositories + metadata + workflow + subIssue + skills + mentions + attachments + alwaysUseCLI + output
-	got := countRuntimeBriefSectionChars(brief)
-
-	if got.Identity != utf8.RuneCountInString(identity) {
-		t.Fatalf("identity chars = %d, want %d", got.Identity, utf8.RuneCountInString(identity))
-	}
-	if got.IdentityBody != utf8.RuneCountInString(identityBody) {
-		t.Fatalf("identity body chars = %d, want %d", got.IdentityBody, utf8.RuneCountInString(identityBody))
-	}
-	if got.Core != utf8.RuneCountInString(core) {
-		t.Fatalf("core chars = %d, want %d", got.Core, utf8.RuneCountInString(core))
-	}
-	if got.CommentFormatting != utf8.RuneCountInString(commentFormatting) {
-		t.Fatalf("comment formatting chars = %d, want %d", got.CommentFormatting, utf8.RuneCountInString(commentFormatting))
-	}
-	if got.Metadata != utf8.RuneCountInString(metadata) {
-		t.Fatalf("metadata chars = %d, want %d", got.Metadata, utf8.RuneCountInString(metadata))
-	}
-	if got.Workflow != utf8.RuneCountInString(workflow) {
-		t.Fatalf("workflow chars = %d, want %d", got.Workflow, utf8.RuneCountInString(workflow))
-	}
-	if got.Skills != utf8.RuneCountInString(skills) {
-		t.Fatalf("skills chars = %d, want %d", got.Skills, utf8.RuneCountInString(skills))
-	}
-	if got.Mentions != utf8.RuneCountInString(mentions) {
-		t.Fatalf("mentions chars = %d, want %d", got.Mentions, utf8.RuneCountInString(mentions))
-	}
-	if got.Output != utf8.RuneCountInString(output) {
-		t.Fatalf("output chars = %d, want %d", got.Output, utf8.RuneCountInString(output))
-	}
-	if got.Header != utf8.RuneCountInString(header) {
-		t.Fatalf("header chars = %d, want %d", got.Header, utf8.RuneCountInString(header))
-	}
-	if got.TaskInitiator != utf8.RuneCountInString(taskInitiator) {
-		t.Fatalf("task initiator chars = %d, want %d", got.TaskInitiator, utf8.RuneCountInString(taskInitiator))
-	}
-	if got.Repositories != utf8.RuneCountInString(repositories) {
-		t.Fatalf("repositories chars = %d, want %d", got.Repositories, utf8.RuneCountInString(repositories))
-	}
-	if got.SubIssue != utf8.RuneCountInString(subIssue) {
-		t.Fatalf("sub issue chars = %d, want %d", got.SubIssue, utf8.RuneCountInString(subIssue))
-	}
-	if got.Attachments != utf8.RuneCountInString(attachments) {
-		t.Fatalf("attachments chars = %d, want %d", got.Attachments, utf8.RuneCountInString(attachments))
-	}
-	if got.AlwaysUseCLI != utf8.RuneCountInString(alwaysUseCLI) {
-		t.Fatalf("always use cli chars = %d, want %d", got.AlwaysUseCLI, utf8.RuneCountInString(alwaysUseCLI))
-	}
-	if got.Misc != utf8.RuneCountInString(misc) {
-		t.Fatalf("misc chars = %d, want %d", got.Misc, utf8.RuneCountInString(misc))
-	}
-	wantOther := utf8.RuneCountInString(header + misc + identityBody + taskInitiator +
-		repositories + subIssue + attachments + alwaysUseCLI)
-	if got.Other != wantOther {
-		t.Fatalf("other chars = %d, want %d", got.Other, wantOther)
+	// Regression: the previous heading-regex categoriser bucketed prose
+	// under `## Agent Identity` into "misc" whenever the body did not lead
+	// with a `##` heading the categoriser knew about. Eve's production
+	// instructions start with the Chinese `【角色定义】` marker (no markdown
+	// heading), so identity_body and task_initiator were both silently
+	// reported as 0 in the prompt-budget log. Pin both as non-zero.
+	dir := t.TempDir()
+	chinese := "【角色定义】\n你现在是一位\u201c超级开发者\u201d。\n\n【核心工作流】\n第一步：xxx\n第二步：yyy"
+	ctx := execenv.TaskContextForEnv{
+		AgentName:         "Eve",
+		AgentID:           "8b0578a3-cf72-4394-9e38-b328eca92463",
+		AgentInstructions: chinese,
+		InitiatorName:     "Yushen",
+		InitiatorType:     "member",
+		InitiatorEmail:    "yushen@devv.ai",
+		IssueID:           "issue-uuid",
+		TriggerCommentID:  "comment-uuid",
 	}
 
-	total := got.Workflow + got.Core + got.Identity + got.Metadata + got.CommentFormatting +
-		got.Mentions + got.Output + got.Skills + got.Other
-	if total != utf8.RuneCountInString(brief) {
-		t.Fatalf("section total chars = %d, want %d", total, utf8.RuneCountInString(brief))
+	content, sizes, err := execenv.InjectRuntimeConfigWithSizes(dir, "codex", ctx)
+	if err != nil {
+		t.Fatalf("InjectRuntimeConfigWithSizes: %v", err)
+	}
+
+	// Whole-brief invariant: every rune attributed to exactly one segment.
+	if got, want := sizes.Total(), utf8.RuneCountInString(content); got != want {
+		t.Fatalf("sizes.Total() = %d, want %d (segment attribution is leaking or double-counting)", got, want)
+	}
+
+	// The Chinese instructions body must land in IdentityBody, not Misc-via-Other.
+	if sizes.IdentityBody == 0 {
+		t.Fatalf("IdentityBody = 0, want > 0 — Chinese agent.instructions was not attributed to the identity body segment")
+	}
+	if got := sizes.IdentityBody; got < utf8.RuneCountInString(chinese) {
+		t.Fatalf("IdentityBody = %d, want >= %d (the raw Chinese body length)", got, utf8.RuneCountInString(chinese))
+	}
+
+	// The Task Initiator block must be attributed even though it carries
+	// no `## ` heading variation — the previous categoriser had it but
+	// only counted it when the regex case fired in the right order.
+	if sizes.TaskInitiator == 0 {
+		t.Fatalf("TaskInitiator = 0, want > 0 — initiator block was emitted but not attributed")
+	}
+
+	// Identity heading is small (just `## Agent Identity\n\n**You are: Eve** (ID: ...)\n\n`).
+	// Sanity-check that the heading bucket is non-zero and bounded.
+	if sizes.Identity == 0 {
+		t.Fatalf("Identity = 0, want > 0 — `## Agent Identity` header was not attributed")
+	}
+	if sizes.Identity > 200 {
+		t.Fatalf("Identity = %d, want <= 200 — the body leaked into the heading bucket", sizes.Identity)
+	}
+}
+
+func TestInjectRuntimeConfigWithSizesAttributesAllSegments(t *testing.T) {
+	t.Parallel()
+
+	// Build a TaskContextForEnv that triggers every conditional segment so
+	// we can pin attribution for each. The test asserts (a) sizes.Total()
+	// equals the brief rune count exactly, and (b) every segment we expect
+	// to be present is non-zero. Anything else (a typo'd b.enter() that
+	// never moves off the previous segment, or a forgotten enter() that
+	// double-counts the next block) shows up as either a total mismatch
+	// or a missing non-zero bucket.
+	dir := t.TempDir()
+	ctx := execenv.TaskContextForEnv{
+		AgentName:                        "Eve",
+		AgentID:                          "agent-id",
+		AgentInstructions:                "agent body line one\nagent body line two",
+		RequestingUserName:               "Owner",
+		RequestingUserProfileDescription: "owner description",
+		InitiatorName:                    "Initiator",
+		InitiatorType:                    "member",
+		InitiatorEmail:                   "init@example.com",
+		WorkspaceContext:                 "workspace context body",
+		Repos: []execenv.RepoContextForEnv{
+			{URL: "https://github.com/multica-ai/multica", Description: "platform"},
+		},
+		ProjectID:          "project-uuid",
+		ProjectTitle:       "Project A",
+		ProjectDescription: "project description",
+		IssueID:            "issue-uuid",
+		TriggerCommentID:   "comment-uuid",
+		AgentSkills: []execenv.SkillContextForEnv{
+			{Name: "skill-a", Description: "first skill"},
+		},
+	}
+
+	content, sizes, err := execenv.InjectRuntimeConfigWithSizes(dir, "codex", ctx)
+	if err != nil {
+		t.Fatalf("InjectRuntimeConfigWithSizes: %v", err)
+	}
+
+	if got, want := sizes.Total(), utf8.RuneCountInString(content); got != want {
+		t.Fatalf("sizes.Total() = %d, want %d (segment attribution is leaking or double-counting)", got, want)
+	}
+
+	checks := []struct {
+		name string
+		got  int
+	}{
+		{"Header", sizes.Header},
+		{"BackgroundTaskSafety", sizes.BackgroundTaskSafety},
+		{"Identity", sizes.Identity},
+		{"IdentityBody", sizes.IdentityBody},
+		{"RequestingUser", sizes.RequestingUser},
+		{"TaskInitiator", sizes.TaskInitiator},
+		{"WorkspaceContext", sizes.WorkspaceContext},
+		{"AvailableCommands", sizes.AvailableCommands},
+		{"CommentFormatting", sizes.CommentFormatting},
+		{"Repositories", sizes.Repositories},
+		{"ProjectContext", sizes.ProjectContext},
+		{"IssueMetadata", sizes.IssueMetadata},
+		{"Workflow", sizes.Workflow},
+		{"SubIssue", sizes.SubIssue},
+		{"Skills", sizes.Skills},
+		{"Mentions", sizes.Mentions},
+		{"Attachments", sizes.Attachments},
+		{"AlwaysUseCLI", sizes.AlwaysUseCLI},
+		{"Output", sizes.Output},
+	}
+	for _, c := range checks {
+		if c.got == 0 {
+			t.Errorf("%s = 0, want > 0 — segment expected to be emitted but no chars attributed", c.name)
+		}
+	}
+
+	// Comment-triggered task: InstructionPrecedence is NOT emitted (only
+	// fires on the assignment-triggered branch). Pin that as zero so a
+	// future refactor that accidentally fires it for comment tasks fails
+	// here rather than in a downstream log analyser.
+	if sizes.InstructionPrecedence != 0 {
+		t.Errorf("InstructionPrecedence = %d, want 0 for comment-triggered tasks", sizes.InstructionPrecedence)
 	}
 }
 

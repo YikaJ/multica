@@ -3086,126 +3086,6 @@ func agentPromptLength(provider, prompt, systemPrompt string) (bytes int, chars 
 	return len(combined), utf8.RuneCountInString(combined)
 }
 
-type runtimeBriefSectionChars struct {
-	Workflow          int
-	Core              int
-	Identity          int
-	Metadata          int
-	CommentFormatting int
-	Mentions          int
-	Output            int
-	Skills            int
-	Other             int
-	Header            int
-	IdentityBody      int
-	TaskInitiator     int
-	Repositories      int
-	SubIssue          int
-	Attachments       int
-	AlwaysUseCLI      int
-	Misc              int
-}
-
-func countRuntimeBriefSectionChars(brief string) runtimeBriefSectionChars {
-	var counts runtimeBriefSectionChars
-	category := "header"
-	for _, line := range strings.SplitAfter(brief, "\n") {
-		heading := strings.TrimSpace(line)
-		if next, ok := runtimeBriefHeadingCategory(heading); ok {
-			category = next
-		} else if category == "identity" && !runtimeBriefIdentityHeaderLine(heading) {
-			category = "identity_body"
-		}
-		chars := utf8.RuneCountInString(line)
-		switch category {
-		case "workflow":
-			counts.Workflow += chars
-		case "core":
-			counts.Core += chars
-		case "identity":
-			counts.Identity += chars
-		case "metadata":
-			counts.Metadata += chars
-		case "comment_formatting":
-			counts.CommentFormatting += chars
-		case "mentions":
-			counts.Mentions += chars
-		case "output":
-			counts.Output += chars
-		case "skills":
-			counts.Skills += chars
-		case "header":
-			counts.Header += chars
-			counts.Other += chars
-		case "identity_body":
-			counts.IdentityBody += chars
-			counts.Other += chars
-		case "task_initiator":
-			counts.TaskInitiator += chars
-			counts.Other += chars
-		case "repositories":
-			counts.Repositories += chars
-			counts.Other += chars
-		case "sub_issue":
-			counts.SubIssue += chars
-			counts.Other += chars
-		case "attachments":
-			counts.Attachments += chars
-			counts.Other += chars
-		case "always_use_cli":
-			counts.AlwaysUseCLI += chars
-			counts.Other += chars
-		default:
-			counts.Misc += chars
-			counts.Other += chars
-		}
-	}
-	return counts
-}
-
-func runtimeBriefIdentityHeaderLine(line string) bool {
-	return line == "" || strings.HasPrefix(line, "**You are:")
-}
-
-func runtimeBriefHeadingCategory(heading string) (category string, ok bool) {
-	switch heading {
-	case "## Agent Identity":
-		return "identity", true
-	case "## Available Commands", "### Core", "### Squad maintenance":
-		return "core", true
-	case "## Issue Metadata":
-		return "metadata", true
-	case "## Comment Formatting":
-		return "comment_formatting", true
-	case "### Workflow":
-		return "workflow", true
-	case "## Mentions", "### When NOT to use a mention link", "### When a mention IS appropriate":
-		return "mentions", true
-	case "## Output":
-		return "output", true
-	case "## Skills":
-		return "skills", true
-	case "## Task Initiator":
-		return "task_initiator", true
-	case "## Repositories":
-		return "repositories", true
-	case "## Sub-issue Creation":
-		return "sub_issue", true
-	case "## Attachments":
-		return "attachments", true
-	case "## Important: Always Use the `multica` CLI":
-		return "always_use_cli", true
-	case "## Background Task Safety",
-		"## Requesting User",
-		"## Workspace Context",
-		"## Project Context",
-		"## Instruction Precedence":
-		return "misc", true
-	default:
-		return "", false
-	}
-}
-
 func inlineSystemPromptSeparator(provider string) string {
 	switch provider {
 	case "kiro", "kimi":
@@ -3426,7 +3306,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
-	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+	// InjectRuntimeConfigWithSizes also returns the per-segment rune counts the
+	// brief builder recorded at write time. We log those directly instead of
+	// re-deriving them with a heading-regex categoriser — that prior approach
+	// silently bucketed identity body and task initiator prose into "misc"
+	// whenever the body lacked a `##` heading the categoriser knew about
+	// (observed on the original PR #4439 instrumentation roll-out).
+	runtimeBrief, briefSizes, err := execenv.InjectRuntimeConfigWithSizes(env.WorkDir, provider, taskCtx)
 	if err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
@@ -3671,7 +3557,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	agentPromptBytes, agentPromptChars := agentPromptLength(provider, prompt, execOpts.SystemPrompt)
-	briefSections := countRuntimeBriefSectionChars(runtimeBrief)
 	taskLog.Info("agent prompt prepared",
 		"provider", provider,
 		"model", model,
@@ -3679,23 +3564,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"prompt_chars", utf8.RuneCountInString(prompt),
 		"runtime_brief_bytes", len(runtimeBrief),
 		"runtime_brief_chars", utf8.RuneCountInString(runtimeBrief),
-		"runtime_brief_workflow_chars", briefSections.Workflow,
-		"runtime_brief_core_chars", briefSections.Core,
-		"runtime_brief_identity_chars", briefSections.Identity,
-		"runtime_brief_metadata_chars", briefSections.Metadata,
-		"runtime_brief_comment_formatting_chars", briefSections.CommentFormatting,
-		"runtime_brief_mentions_chars", briefSections.Mentions,
-		"runtime_brief_output_chars", briefSections.Output,
-		"runtime_brief_skills_chars", briefSections.Skills,
-		"runtime_brief_other_chars", briefSections.Other,
-		"runtime_brief_header_chars", briefSections.Header,
-		"runtime_brief_identity_body_chars", briefSections.IdentityBody,
-		"runtime_brief_task_initiator_chars", briefSections.TaskInitiator,
-		"runtime_brief_repositories_chars", briefSections.Repositories,
-		"runtime_brief_sub_issue_chars", briefSections.SubIssue,
-		"runtime_brief_attachments_chars", briefSections.Attachments,
-		"runtime_brief_always_use_cli_chars", briefSections.AlwaysUseCLI,
-		"runtime_brief_misc_chars", briefSections.Misc,
+		"runtime_brief_header_chars", briefSizes.Header,
+		"runtime_brief_background_task_safety_chars", briefSizes.BackgroundTaskSafety,
+		"runtime_brief_identity_chars", briefSizes.Identity,
+		"runtime_brief_identity_body_chars", briefSizes.IdentityBody,
+		"runtime_brief_requesting_user_chars", briefSizes.RequestingUser,
+		"runtime_brief_task_initiator_chars", briefSizes.TaskInitiator,
+		"runtime_brief_workspace_context_chars", briefSizes.WorkspaceContext,
+		"runtime_brief_available_commands_chars", briefSizes.AvailableCommands,
+		"runtime_brief_comment_formatting_chars", briefSizes.CommentFormatting,
+		"runtime_brief_repositories_chars", briefSizes.Repositories,
+		"runtime_brief_project_context_chars", briefSizes.ProjectContext,
+		"runtime_brief_issue_metadata_chars", briefSizes.IssueMetadata,
+		"runtime_brief_instruction_precedence_chars", briefSizes.InstructionPrecedence,
+		"runtime_brief_workflow_chars", briefSizes.Workflow,
+		"runtime_brief_sub_issue_chars", briefSizes.SubIssue,
+		"runtime_brief_skills_chars", briefSizes.Skills,
+		"runtime_brief_mentions_chars", briefSizes.Mentions,
+		"runtime_brief_attachments_chars", briefSizes.Attachments,
+		"runtime_brief_always_use_cli_chars", briefSizes.AlwaysUseCLI,
+		"runtime_brief_output_chars", briefSizes.Output,
 		"inline_system_prompt", execOpts.SystemPrompt != "",
 		"system_prompt_bytes", len(execOpts.SystemPrompt),
 		"system_prompt_chars", utf8.RuneCountInString(execOpts.SystemPrompt),
