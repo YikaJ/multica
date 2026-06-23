@@ -20,6 +20,18 @@
 --     ship green on its own. This migration only ADDS channel_* and
 --     copies the data forward.
 --
+--   * ROLLOUT — NON-ROLLING CUTOVER REQUIRED. This backfill is a one-time
+--     copy. After it runs, new code reads/writes channel_* while any
+--     pre-cutover (v0.3.x) code still reads/writes lark_*: the two table
+--     sets never cross-deduplicate, and each side would claim the same
+--     Feishu bot's WS lease on its own table and open a duplicate
+--     connection, double-processing inbound events (duplicate messages /
+--     /issue / runs). So old and new backend hub processes MUST NOT run
+--     concurrently against this schema — stop the old hub before applying
+--     this migration and starting the new code (recreate, not rolling).
+--     Rollback to a pre-cutover build is not lossless once the new code has
+--     written Feishu state into channel_*.
+--
 -- app_secret_encrypted is BYTEA; it is carried into the JSONB config as a
 -- base64 string. PostgreSQL's encode(...,'base64') MIME-wraps the output
 -- with a newline every 76 chars, and a secretbox-sealed app secret (~72

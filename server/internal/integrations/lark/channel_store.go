@@ -7,9 +7,11 @@ package lark
 // by a channel_* query and translating at the JSONB-config boundary (store.go).
 //
 // The methods take and return the package's flat domain types (Installation,
-// UserBinding, ChatSessionBinding, InboundMessageDedup, BindingToken,
-// OutboundCardMessage) and the *Params types in params.go. Only channel_* rows
-// are ever read or written; the retired lark_* tables and queries are gone.
+// UserBinding, ChatSessionBinding, InboundMessageDedup, BindingTokenRow,
+// OutboundCardMessage) and the *Params types in params.go. This store reads
+// and writes only channel_*, never lark_*; queries/lark.sql is deleted. The
+// physical lark_* tables are retained one release for rollout/rollback safety
+// (see migration 124's ROLLOUT note) and dropped by a later cleanup migration.
 
 import (
 	"context"
