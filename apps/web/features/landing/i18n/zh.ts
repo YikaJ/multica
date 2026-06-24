@@ -294,6 +294,22 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.29",
+        date: "2026-06-24",
+        title: "智能体阅读 Issue 更聚焦，定时自动任务更可靠",
+        changes: [],
+        features: [
+          "智能体读取较长 Issue 时，会自动折叠已解决的讨论，只保留关键结论，避免把上下文浪费在已经结束的来回沟通上",
+        ],
+        improvements: [
+          "定时自动任务在错过执行、服务重启和多实例同时工作时更可靠，同一个计划时间只会被处理一次，恢复过程也更清楚",
+        ],
+        fixes: [
+          "取消聊天任务后恢复到输入框的文字，如果被删除，切换会话再回来也不会重新出现",
+          "@ 提及搜索现在会选中高亮的结果，即使实时搜索结果改变了列表顺序也不会选错人或 Issue",
+        ],
+      },
+      {
         version: "0.3.28",
         date: "2026-06-23",
         title: "子 Issue 支持分阶段，新增 Qoder 运行时支持",

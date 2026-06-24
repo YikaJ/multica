@@ -294,6 +294,22 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.29",
+        date: "2026-06-24",
+        title: "Smarter Issue Reading and More Reliable Scheduled Autopilots",
+        changes: [],
+        features: [
+          "Agents now read long Issue discussions with resolved threads folded to the key conclusion, helping them focus on the current work instead of settled back-and-forth",
+        ],
+        improvements: [
+          "Scheduled autopilots are more reliable across missed runs, restarts, and overlapping workers, so the same scheduled moment is handled once and recovery is clearer",
+        ],
+        fixes: [
+          "Deleting text restored after cancelling a chat task now stays deleted when you switch away and return",
+          "@mention search now selects the highlighted result, even when live search results reorder the list",
+        ],
+      },
+      {
         version: "0.3.28",
         date: "2026-06-23",
         title: "Staged Sub-Issues and Qoder Runtime Support",
