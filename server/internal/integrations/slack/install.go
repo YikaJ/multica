@@ -63,7 +63,10 @@ var (
 	// ErrTeamOwnedByAnotherWorkspace is returned by Complete when the Slack
 	// workspace (team) is already connected to a DIFFERENT Multica workspace.
 	// Re-pointing it would inherit the other workspace's user / chat-session
-	// bindings, so we refuse it — the owning workspace must disconnect first.
+	// bindings, so we refuse it. A Slack workspace stays bound to its first
+	// Multica workspace: migrating it is an operator/support action (revoking
+	// just sets status='revoked' and keeps the row + unique index), not a silent
+	// re-OAuth from the other workspace.
 	ErrTeamOwnedByAnotherWorkspace = errors.New("slack: this Slack workspace is already connected to a different Multica workspace")
 )
 
@@ -261,8 +264,9 @@ func (s *InstallService) Complete(ctx context.Context, code, rawState string) (C
 	qtx := s.q.WithTx(tx)
 
 	// Look up any existing installation for this Slack team (team_id is stored as
-	// config->>'app_id'). A team is one installation globally; the result drives
-	// the cross-workspace guard and the agent-change cleanup below.
+	// config->>'app_id'). This drives ONLY the agent-change cleanup below — it is
+	// NOT the cross-workspace guard (a plain SELECT can't win the concurrent-OAuth
+	// race; that guard lives atomically in the upsert's WHERE clause).
 	existing, lookupErr := qtx.GetChannelInstallationByAppID(ctx, db.GetChannelInstallationByAppIDParams{
 		ChannelType: string(TypeSlack),
 		AppID:       resp.Team.ID,
@@ -272,16 +276,13 @@ func (s *InstallService) Complete(ctx context.Context, code, rawState string) (C
 		return CompletedInstall{}, fmt.Errorf("lookup existing slack installation: %w", lookupErr)
 	}
 
-	// A Slack workspace belongs to exactly one Multica workspace. Refuse to
-	// silently re-point it to another — that would inherit this workspace's user
-	// and chat-session bindings. The owning workspace must disconnect first.
-	if hadExisting && existing.WorkspaceID != wsID {
-		return CompletedInstall{}, ErrTeamOwnedByAnotherWorkspace
-	}
-
 	// Team-keyed upsert: re-connecting the same team — including to represent a
-	// different agent — updates the existing row rather than colliding with the
-	// (channel_type, app_id) unique index.
+	// different agent in the SAME workspace — updates the existing row rather than
+	// colliding with the (channel_type, app_id) index. Its ON CONFLICT update is
+	// fenced to the same Multica workspace, so a team already owned by a DIFFERENT
+	// workspace updates no row and returns no rows — the atomic cross-workspace
+	// guard. (A Slack workspace stays bound to its first Multica workspace;
+	// migrating it requires operator/support intervention, not a silent re-OAuth.)
 	inst, err := qtx.UpsertChannelInstallationByAppID(ctx, db.UpsertChannelInstallationByAppIDParams{
 		WorkspaceID:     wsID,
 		AgentID:         agentID,
@@ -290,6 +291,9 @@ func (s *InstallService) Complete(ctx context.Context, code, rawState string) (C
 		InstallerUserID: userID,
 	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return CompletedInstall{}, ErrTeamOwnedByAnotherWorkspace
+		}
 		return CompletedInstall{}, fmt.Errorf("upsert slack installation: %w", err)
 	}
 

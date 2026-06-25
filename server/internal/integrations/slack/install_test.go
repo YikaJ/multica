@@ -66,6 +66,11 @@ func (f *fakeInstallQueries) GetChannelInstallationByAppID(_ context.Context, _ 
 func (f *fakeInstallQueries) UpsertChannelInstallationByAppID(_ context.Context, arg db.UpsertChannelInstallationByAppIDParams) (db.ChannelInstallation, error) {
 	f.upsertCalled = true
 	f.upsertParams = arg
+	// Simulate the query's `ON CONFLICT ... WHERE workspace_id = EXCLUDED.workspace_id`
+	// guard: a team already owned by a different workspace updates no row.
+	if f.existing != nil && f.existing.WorkspaceID != arg.WorkspaceID {
+		return db.ChannelInstallation{}, pgx.ErrNoRows
+	}
 	return db.ChannelInstallation{
 		ID:              f.rowID,
 		WorkspaceID:     arg.WorkspaceID,
@@ -377,8 +382,13 @@ func TestComplete_CrossWorkspace_Rejected(t *testing.T) {
 	if _, err := svc.Complete(context.Background(), "code", state); err != ErrTeamOwnedByAnotherWorkspace {
 		t.Fatalf("cross-workspace install = %v, want ErrTeamOwnedByAnotherWorkspace", err)
 	}
-	if q.upsertCalled {
-		t.Error("a cross-workspace install must be rejected before the upsert")
+	// The guard is the upsert's atomic WHERE (no rows updated), not a pre-upsert
+	// SELECT — so the upsert IS attempted, but no installer is bound.
+	if !q.upsertCalled {
+		t.Error("the atomic guard runs inside the upsert, which must be attempted")
+	}
+	if q.bindCalled {
+		t.Error("a rejected install must not bind the installer")
 	}
 }
 

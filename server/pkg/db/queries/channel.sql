@@ -42,28 +42,35 @@ RETURNING *;
 -- Team-keyed install / re-install for channels whose natural identity is the
 -- platform workspace, not the (agent) pairing. Slack: one Slack workspace
 -- (team_id, stored as config->>'app_id') maps to exactly one installation, so
--- re-connecting it — even to represent a DIFFERENT agent — UPDATES the existing
--- row (moving agent_id) instead of colliding with the (channel_type, app_id)
--- unique index. Contrast UpsertChannelInstallation, whose conflict key is
--- (workspace_id, agent_id, channel_type): right for Feishu (one app per agent),
--- wrong for Slack (a second agent connecting the same team would hit the
--- (channel_type, app_id) index). NOTE: a re-connect that would move the team to
--- an agent that already holds a different Slack install still trips the
--- (workspace_id, agent_id, channel_type) unique constraint — that genuine
--- conflict surfaces as an error the OAuth callback turns into a redirect.
+-- re-connecting it — even to represent a DIFFERENT agent in the SAME Multica
+-- workspace — UPDATES the existing row (moving agent_id) instead of colliding
+-- with the (channel_type, app_id) unique index. Contrast UpsertChannelInstallation,
+-- whose conflict key is (workspace_id, agent_id, channel_type): right for Feishu
+-- (one app per agent), wrong for Slack.
+--
+-- The `WHERE channel_installation.workspace_id = EXCLUDED.workspace_id` fences
+-- the conflict update to the SAME Multica workspace: a team already owned by a
+-- DIFFERENT workspace updates no row and RETURNING is empty (pgx.ErrNoRows),
+-- which the caller maps to ErrTeamOwnedByAnotherWorkspace. This is the ATOMIC
+-- cross-workspace guard — a plain SELECT before the upsert cannot stop two
+-- workspaces racing to OAuth the same team (both read no rows, then one inserts
+-- and the other's conflict-update would silently steal it). A re-connect that
+-- would move the team to an agent already holding a different Slack install in
+-- the same workspace still trips the (workspace_id, agent_id, channel_type)
+-- unique constraint — a genuine conflict the OAuth callback turns into a redirect.
 INSERT INTO channel_installation (
     workspace_id, agent_id, channel_type, config, installer_user_id
 ) VALUES (
     $1, $2, $3, $4, $5
 )
 ON CONFLICT (channel_type, (config ->> 'app_id')) DO UPDATE SET
-    workspace_id      = EXCLUDED.workspace_id,
     agent_id          = EXCLUDED.agent_id,
     config            = EXCLUDED.config,
     installer_user_id = EXCLUDED.installer_user_id,
     status            = 'active',
     installed_at      = now(),
     updated_at        = now()
+WHERE channel_installation.workspace_id = EXCLUDED.workspace_id
 RETURNING *;
 
 -- name: GetChannelInstallation :one

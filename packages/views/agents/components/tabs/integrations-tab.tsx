@@ -65,6 +65,23 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
       (inst) => inst.agent_id === agent.id && inst.status === "active",
     ) ?? false;
 
+  // Install / manage is gated on workspace owner/admin for every platform, so
+  // the role notice is hoisted above the per-platform sections — one note
+  // instead of repeating it under each integration. Members can still view
+  // connected bots in the (member-visible) Settings → Integrations listing.
+  if (!canManage) {
+    return (
+      <div className="space-y-6">
+        <p className="text-xs text-muted-foreground">
+          {t(($) => $.tab_body.integrations.intro)}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {t(($) => $.tab_body.integrations.members_note)}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <p className="text-xs text-muted-foreground">
@@ -90,14 +107,6 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             // removed after an install existed" race.
             <p className="text-xs text-muted-foreground">
               {ts(($) => $.lark.not_enabled_title)}
-            </p>
-          ) : !canManage ? (
-            // The backend gates install / manage on workspace owner/admin.
-            // Members can still view connected bots in the (member-visible)
-            // Settings listing, so point them there rather than show a dead
-            // button.
-            <p className="text-xs text-muted-foreground">
-              {t(($) => $.tab_body.integrations.members_note)}
             </p>
           ) : !installSupported && !hasActiveInstall ? (
             // Key is set but the device-flow transport isn't wired in this
@@ -137,10 +146,6 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
           {!slackConfigured ? (
             <p className="text-xs text-muted-foreground">
               {ts(($) => $.slack.not_enabled_title)}
-            </p>
-          ) : !canManage ? (
-            <p className="text-xs text-muted-foreground">
-              {t(($) => $.tab_body.integrations.members_note)}
             </p>
           ) : !slackInstallSupported && !slackHasActiveInstall ? (
             // Secret key is set but the OAuth client credentials aren't, so a
