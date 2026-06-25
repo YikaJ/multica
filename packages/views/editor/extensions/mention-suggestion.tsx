@@ -288,7 +288,8 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
           setSelectedKey(mentionItemKey(orderedItems[next]!));
           return true;
         }
-        if (event.key === "Enter") {
+        if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) {
+          if (event.key === "Tab") event.preventDefault();
           if (orderedItems.length === 0) return true;
           selectItem(orderedItems[selectedIndex]);
           return true;

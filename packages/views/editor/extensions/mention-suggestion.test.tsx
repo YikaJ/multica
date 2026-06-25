@@ -209,6 +209,41 @@ describe("createMentionSuggestion", () => {
     ).toBe(true);
   });
 
+  it("uses Tab to commit the highlighted row without moving browser focus", () => {
+    const command = vi.fn<(item: MentionItem) => void>();
+    const ref = createRef<MentionListRef>();
+    const items: MentionItem[] = [
+      { id: "i-1", label: "MUL-1", type: "issue" },
+      { id: "i-2", label: "MUL-2", type: "issue" },
+    ];
+
+    render(
+      <I18nWrapper>
+        <MentionList ref={ref} items={items} query="" command={command} />
+      </I18nWrapper>,
+    );
+
+    const press = (event: KeyboardEvent) => {
+      let handled = false;
+      act(() => {
+        handled = ref.current?.onKeyDown({ event }) ?? false;
+      });
+      return handled;
+    };
+
+    press(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+    const tab = new KeyboardEvent("keydown", { key: "Tab", cancelable: true });
+
+    expect(press(tab)).toBe(true);
+    expect(tab.defaultPrevented).toBe(true);
+    expect(command).toHaveBeenCalledTimes(1);
+    expect(command.mock.calls[0]?.[0]?.label).toBe("MUL-2");
+
+    const shiftTab = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, cancelable: true });
+    expect(press(shiftTab)).toBe(false);
+    expect(shiftTab.defaultPrevented).toBe(false);
+  });
+
   // MUL-3607: groupItems() re-buckets the list (current → recent → search →
   // users → issues), so an item that sits LATER in the data array can render
   // NEAR THE TOP. Selection must follow the rendered order — otherwise the
