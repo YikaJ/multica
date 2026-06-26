@@ -350,7 +350,7 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 			"chat_session_id", uuidString(sessionID), "err", err.Error())
 		return
 	}
-	if _, err := r.tasks.EnqueueChatTask(ctx, session, initiatorUserID, forceFresh); err != nil {
+	if _, err := r.tasks.EnqueueChatTask(ctx, session, pgtype.UUID{}, initiatorUserID, forceFresh); err != nil {
 		switch {
 		case errors.Is(err, service.ErrChatTaskAgentNoRuntime):
 			r.emitFlushReply(ctx, set, inst, msg, sessionID, OutcomeAgentOffline)

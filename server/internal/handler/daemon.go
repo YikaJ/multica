@@ -1571,7 +1571,37 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
-			if !task.ForceFreshSession {
+			if task.ChatThreadID.Valid {
+				resp.ChatThreadID = uuidToString(task.ChatThreadID)
+				if thread, err := h.Queries.GetChatThreadInSession(r.Context(), db.GetChatThreadInSessionParams{
+					ID:            task.ChatThreadID,
+					ChatSessionID: cs.ID,
+				}); err == nil && strings.TrimSpace(thread.Title) != "" {
+					resp.ThreadName = thread.Title
+				}
+			}
+			if !task.ForceFreshSession && task.ChatThreadID.Valid {
+				if session, err := h.Queries.GetChatAgentSessionByThread(r.Context(), db.GetChatAgentSessionByThreadParams{
+					ChatThreadID: task.ChatThreadID,
+					AgentID:      task.AgentID,
+					RuntimeID:    task.RuntimeID,
+				}); err == nil {
+					if session.ProviderSessionID.Valid {
+						resp.PriorSessionID = session.ProviderSessionID.String
+					}
+					if session.WorkDir.Valid {
+						resp.PriorWorkDir = session.WorkDir.String
+					}
+				}
+				if prior, err := h.Queries.GetLastChatTaskSessionByThread(r.Context(), task.ChatThreadID); err == nil && prior.SessionID.Valid {
+					if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
+						resp.PriorSessionID = prior.SessionID.String
+					}
+					if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
+						resp.PriorWorkDir = prior.WorkDir.String
+					}
+				}
+			} else if !task.ForceFreshSession {
 				// Resume chat sessions only when the stored pointer was produced
 				// by the same runtime as the claiming task. When the chat_session
 				// pointer is missing (legacy NULL runtime_id), stale (last task
@@ -1595,25 +1625,26 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			// Build the chat prompt from EVERY user message that has arrived
-			// since the agent's last reply — not just the most recent one. A
-			// short-window debounce (MUL-2968) can land several user messages
-			// before a single run fires; the agent resumes its prior session
-			// and only learns of new input through resp.ChatMessage, so
-			// delivering just the latest message would silently drop the
-			// earlier ones (e.g. "看上海天气" then "还有青岛" → only Qingdao
-			// answered). The unanswered set is the trailing run of user
-			// messages after the last assistant message (every completed or
-			// failed run writes an assistant row, so that anchor advances each
-			// turn). Attachments are collected from each included message so
-			// the agent can `multica attachment download <id>` — the markdown
-			// URL alone is signed and 30-min expiring on the private CDN.
-			if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil && len(msgs) > 0 {
-				unanswered := trailingUserMessages(msgs)
+			// Threaded chat prompt: when a task is bound to a chat_thread, the
+			// thread is the context boundary. Legacy/channel tasks without a
+			// thread id keep the old session-level trailing-user window.
+			if msgs, err := func() ([]db.ChatMessage, error) {
+				if task.ChatThreadID.Valid {
+					return h.Queries.ListChatMessagesByThread(r.Context(), db.ListChatMessagesByThreadParams{
+						ChatSessionID: cs.ID,
+						ChatThreadID:  task.ChatThreadID,
+					})
+				}
+				return h.Queries.ListChatMessages(r.Context(), cs.ID)
+			}(); err == nil && len(msgs) > 0 {
+				unanswered := msgs
+				if !task.ChatThreadID.Valid {
+					unanswered = trailingUserMessages(msgs)
+				}
 				parts := make([]string, 0, len(unanswered))
 				for _, m := range unanswered {
 					if strings.TrimSpace(m.Content) != "" {
-						parts = append(parts, m.Content)
+						parts = append(parts, formatChatPromptMessage(m))
 					}
 					if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
 						ChatMessageID: m.ID,
@@ -1998,6 +2029,14 @@ func trailingUserMessages(msgs []db.ChatMessage) []db.ChatMessage {
 		}
 	}
 	return msgs[start:]
+}
+
+func formatChatPromptMessage(msg db.ChatMessage) string {
+	label := "User"
+	if msg.Role == "assistant" {
+		label = "Assistant"
+	}
+	return fmt.Sprintf("%s:\n%s", label, msg.Content)
 }
 
 // ListPendingTasksByRuntime returns queued/dispatched tasks for a runtime.

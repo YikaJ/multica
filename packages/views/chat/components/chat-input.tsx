@@ -59,6 +59,7 @@ interface ChatInputProps {
      * navigated to. Omit to restore into the current draft (legacy behavior).
      */
     sessionId?: string;
+    draftKeyScope?: string;
   } | null;
   onRestoreDraftConsumed?: () => void;
   /** Receives a File and returns the attachment row (with id + CDN link).
@@ -77,6 +78,9 @@ interface ChatInputProps {
   noAgent?: boolean;
   /** Name of the currently selected agent, used in the placeholder. */
   agentName?: string;
+  /** Optional draft namespace for multiple composers in the same chat session. */
+  draftKeyScope?: string;
+  placeholder?: string;
   /** Rendered at the bottom-left of the input bar — typically the agent picker. */
   leftAdornment?: ReactNode;
   /** Chat @ suggestions: current/recent issue/project entries. */
@@ -93,6 +97,8 @@ export function ChatInput({
   disabled,
   noAgent,
   agentName,
+  draftKeyScope,
+  placeholder,
   leftAdornment,
   contextItems,
 }: ChatInputProps) {
@@ -125,7 +131,8 @@ export function ChatInput({
   // user would see the image flash on then disappear. Keeping editor
   // identity stable across the lazy-create event is what makes
   // first-upload-creates-session work the same as second-upload.
-  const draftKey = activeSessionId ?? newSessionDraftKey(selectedAgentId);
+  const baseDraftKey = activeSessionId ?? newSessionDraftKey(selectedAgentId);
+  const draftKey = draftKeyScope ? `${baseDraftKey}:${draftKeyScope}` : baseDraftKey;
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
   const draftAttachments = useChatStore(
@@ -138,7 +145,7 @@ export function ChatInput({
   const [isEmpty, setIsEmpty] = useState(!inputDraft.trim());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const consumedRestoreIdRef = useRef<string | null>(null);
-  const editorKey = selectedAgentId ?? "no-agent";
+  const editorKey = `${selectedAgentId ?? "no-agent"}:${draftKeyScope ?? "main"}`;
   // Number of in-flight uploads. We track this explicitly (rather than
   // peeking at the editor on every render) so the SubmitButton visibly
   // disables the instant an upload starts and re-enables the instant it
@@ -172,8 +179,11 @@ export function ChatInput({
     // failed after the user navigated away must not dump its content into the
     // session they're now looking at — the request stays pending until they
     // return to the source session (draftKey then matches).
-    if (restoreDraftRequest.sessionId && restoreDraftRequest.sessionId !== draftKey) {
-      return;
+    if (restoreDraftRequest.sessionId) {
+      const restoreDraftKey = restoreDraftRequest.draftKeyScope
+        ? `${restoreDraftRequest.sessionId}:${restoreDraftRequest.draftKeyScope}`
+        : restoreDraftRequest.sessionId;
+      if (restoreDraftKey !== draftKey) return;
     }
     consumedRestoreIdRef.current = restoreDraftRequest.id;
     if (inputDraft.trim()) {
@@ -317,13 +327,13 @@ export function ChatInput({
     if (!committed) commitInput();
   };
 
-  const placeholder = noAgent
+  const resolvedPlaceholder = placeholder ?? (noAgent
     ? t(($) => $.input.placeholder_no_agent)
     : disabled
       ? t(($) => $.input.placeholder_archived)
       : agentName
         ? t(($) => $.input.placeholder_named, { name: agentName })
-        : t(($) => $.input.placeholder_default);
+        : t(($) => $.input.placeholder_default));
 
   const uploadEnabled = !!onUploadFile && !disabled && !noAgent;
 
@@ -359,7 +369,7 @@ export function ChatInput({
             key={editorKey}
             ref={editorRef}
             defaultValue={inputDraft}
-            placeholder={placeholder}
+            placeholder={resolvedPlaceholder}
             onUpdate={(md) => {
               setIsEmpty(!md.trim());
               setInputDraft(draftKey, md);

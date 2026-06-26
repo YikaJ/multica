@@ -94,6 +94,8 @@
     "failed_suffix": " · {{count}} failed ({{percent}}%)"
   },
   "row_actions": {
+    "pin_to_sidebar": "Pin to sidebar",
+    "unpin_from_sidebar": "Unpin from sidebar",
     "cancel_all_tasks": "Cancel all tasks",
     "duplicate": "Duplicate",
     "restore": "Restore",
@@ -136,6 +138,8 @@
     "archive_dialog_cancel": "Cancel",
     "archive_dialog_confirm": "Archive",
     "more_archive": "Archive Agent",
+    "pin_tooltip": "Pin to sidebar",
+    "unpin_tooltip": "Unpin from sidebar",
     "agent_updated_toast": "Agent updated",
     "update_failed_toast": "Failed to update agent",
     "agent_archived_toast": "Agent archived",

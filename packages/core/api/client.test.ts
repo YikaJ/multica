@@ -662,6 +662,30 @@ describe("ApiClient", () => {
       });
     });
 
+    it("sendChatMessage serialises reply thread identifiers onto the JSON body when present", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ message_id: "m1", task_id: "t1", thread_task_id: "root-task", created_at: "" }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      await client.sendChatMessage("session-1", "hello", ["att-1"], {
+        replyToTaskId: "root-task",
+        chatThreadId: "thread-1",
+      });
+
+      const [, init] = fetchMock.mock.calls[0]!;
+      expect(JSON.parse(init?.body as string)).toEqual({
+        content: "hello",
+        attachment_ids: ["att-1"],
+        chat_thread_id: "thread-1",
+        reply_to_task_id: "root-task",
+      });
+    });
+
     it("sendChatMessage omits attachment_ids when the list is empty or undefined", async () => {
       const fetchMock = vi.fn().mockImplementation(() =>
         Promise.resolve(

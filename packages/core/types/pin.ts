@@ -1,9 +1,9 @@
-export type PinnedItemType = "issue" | "project";
+export type PinnedItemType = "issue" | "project" | "agent";
 
 /**
  * Pin metadata only. Title / status / identifier / icon are NOT here —
- * consumers derive them from `issueDetailOptions` / `projectDetailOptions`
- * so the sidebar reacts to `issue:updated` / `project:updated` events
+ * consumers derive them from issue / project / agent query caches
+ * so the sidebar reacts to entity update events
  * automatically, without needing a cross-entity invalidate on `pinKeys`.
  */
 export interface PinnedItem {

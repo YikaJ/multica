@@ -35,6 +35,7 @@
     "new_issue": "New Issue",
     "new_issue_shortcut": "C",
     "pinned_label": "Pinned",
+    "agents_label": "Agents",
     "workspace_group": "Workspace",
     "configure_group": "Configure",
     "unread_overflow": "99+",

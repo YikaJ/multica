@@ -5,6 +5,8 @@ import {
   AlertCircle,
   Copy,
   MoreHorizontal,
+  Pin,
+  PinOff,
   RotateCcw,
   Square,
   Trash2,
@@ -43,6 +45,8 @@ interface AgentRowActionsProps {
   // the server is still the source of truth, this only hides UI for ops
   // the user can't perform.
   canManage: boolean;
+  isPinned: boolean;
+  onTogglePin: (agent: Agent) => void;
   // Called when the user picks "Duplicate" — the page opens a Create
   // dialog pre-populated with this agent's config as a template.
   onDuplicate: (agent: Agent) => void;
@@ -64,6 +68,8 @@ export function AgentRowActions({
   agent,
   presence,
   canManage,
+  isPinned,
+  onTogglePin,
   onDuplicate,
 }: AgentRowActionsProps) {
   const { t } = useT("agents");
@@ -82,11 +88,12 @@ export function AgentRowActions({
   // below a flat list of conditionals rather than a tangle of role/state
   // branches.
   const showStop = canManage && !isArchived && hasActiveWork;
+  const showPin = !isArchived;
   const showDuplicate = !isArchived; // any workspace member can duplicate
   const showArchive = canManage && !isArchived;
   const showRestore = canManage && isArchived;
 
-  const hasAnyAction = showStop || showDuplicate || showArchive || showRestore;
+  const hasAnyAction = showStop || showPin || showDuplicate || showArchive || showRestore;
 
   const invalidateAgents = () => {
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
@@ -145,6 +152,16 @@ export function AgentRowActions({
           }
         />
         <DropdownMenuContent align="end" className="w-auto">
+          {showPin && (
+            <DropdownMenuItem onClick={() => onTogglePin(agent)}>
+              {isPinned ? (
+                <PinOff className="h-3.5 w-3.5" />
+              ) : (
+                <Pin className="h-3.5 w-3.5" />
+              )}
+              {isPinned ? t(($) => $.row_actions.unpin_from_sidebar) : t(($) => $.row_actions.pin_to_sidebar)}
+            </DropdownMenuItem>
+          )}
           {showStop && (
             <DropdownMenuItem
               onClick={() => setConfirmCancel(true)}

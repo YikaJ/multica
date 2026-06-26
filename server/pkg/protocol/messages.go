@@ -81,10 +81,12 @@ type RuntimeInfo struct {
 // ChatMessagePayload is broadcast when a new chat message is created.
 type ChatMessagePayload struct {
 	ChatSessionID string `json:"chat_session_id"`
+	ChatThreadID  string `json:"chat_thread_id,omitempty"`
 	MessageID     string `json:"message_id"`
 	Role          string `json:"role"`
 	Content       string `json:"content"`
 	TaskID        string `json:"task_id,omitempty"`
+	ThreadTaskID  string `json:"thread_task_id,omitempty"`
 	CreatedAt     string `json:"created_at"`
 }
 
@@ -95,9 +97,11 @@ type ChatMessagePayload struct {
 // a visible flicker (#2123).
 type ChatDonePayload struct {
 	ChatSessionID string `json:"chat_session_id"`
+	ChatThreadID  string `json:"chat_thread_id,omitempty"`
 	TaskID        string `json:"task_id"`
 	MessageID     string `json:"message_id,omitempty"`
 	Content       string `json:"content,omitempty"`
+	ThreadTaskID  string `json:"thread_task_id,omitempty"`
 	ElapsedMs     int64  `json:"elapsed_ms,omitempty"`
 	CreatedAt     string `json:"created_at,omitempty"`
 }

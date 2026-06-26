@@ -731,7 +731,7 @@ var ErrChatTaskAgentNoRuntime = errors.New("chat task: agent has no runtime")
 // forceFreshSession applies only to the task created by this call. The daemon
 // uses it to skip prior chat-session resume for this dispatch without clearing
 // the chat session's stored resume pointer for future normal messages.
-func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession, chatThreadID pgtype.UUID, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, chatSession.AgentID)
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -749,6 +749,7 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		RuntimeID:       agent.RuntimeID,
 		Priority:        2, // medium priority for chat
 		ChatSessionID:   chatSession.ID,
+		ChatThreadID:    chatThreadID,
 		InitiatorUserID: initiatorUserID,
 		ForceFreshSession: pgtype.Bool{
 			Bool:  forceFreshSession,
@@ -939,11 +940,21 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 			}
 			return nil
 		}
+		threadTaskID, err := qtx.GetChatThreadTaskIDByTask(ctx, task.ID)
+		if err != nil {
+			slog.Warn("failed to resolve cancelled chat thread id",
+				"task_id", util.UUIDToString(task.ID),
+				"error", err,
+			)
+			threadTaskID = task.ID
+		}
 		if _, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
 			ChatSessionID: task.ChatSessionID,
+			ChatThreadID:  task.ChatThreadID,
 			Role:          "assistant",
 			Content:       "Stopped.",
 			TaskID:        task.ID,
+			ThreadTaskID:  threadTaskID,
 			ElapsedMs:     computeChatElapsedMs(task),
 		}); err != nil {
 			return fmt.Errorf("create cancelled chat message: %w", err)
@@ -1283,6 +1294,18 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			}); err != nil {
 				return fmt.Errorf("update chat session resume pointer: %w", err)
 			}
+			if t.ChatThreadID.Valid {
+				if err := qtx.UpsertChatAgentSession(ctx, db.UpsertChatAgentSessionParams{
+					ChatSessionID:     t.ChatSessionID,
+					ChatThreadID:      t.ChatThreadID,
+					AgentID:           t.AgentID,
+					RuntimeID:         t.RuntimeID,
+					ProviderSessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
+					WorkDir:           pgtype.Text{String: workDir, Valid: workDir != ""},
+				}); err != nil {
+					return fmt.Errorf("update chat thread resume pointer: %w", err)
+				}
+			}
 		}
 		return nil
 	}); err != nil {
@@ -1387,9 +1410,11 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			body := util.UnescapeBackslashEscapes(payload.Output)
 			row, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
 				ChatSessionID: task.ChatSessionID,
+				ChatThreadID:  task.ChatThreadID,
 				Role:          "assistant",
 				Content:       redact.Text(body),
 				TaskID:        task.ID,
+				ThreadTaskID:  s.chatThreadTaskID(ctx, task.ID),
 				ElapsedMs:     computeChatElapsedMs(task),
 			})
 			if err != nil {
@@ -1477,6 +1502,18 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			}); err != nil {
 				return fmt.Errorf("update chat session resume pointer: %w", err)
 			}
+			if t.ChatThreadID.Valid {
+				if err := qtx.UpsertChatAgentSession(ctx, db.UpsertChatAgentSessionParams{
+					ChatSessionID:     t.ChatSessionID,
+					ChatThreadID:      t.ChatThreadID,
+					AgentID:           t.AgentID,
+					RuntimeID:         t.RuntimeID,
+					ProviderSessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
+					WorkDir:           pgtype.Text{String: workDir, Valid: workDir != ""},
+				}); err != nil {
+					return fmt.Errorf("update chat thread resume pointer: %w", err)
+				}
+			}
 		}
 		return nil
 	}); err != nil {
@@ -1530,9 +1567,11 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	if task.ChatSessionID.Valid && retried == nil {
 		if _, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
 			ChatSessionID: task.ChatSessionID,
+			ChatThreadID:  task.ChatThreadID,
 			Role:          "assistant",
 			Content:       redact.Text(errMsg),
 			TaskID:        pgtype.UUID{Bytes: task.ID.Bytes, Valid: true},
+			ThreadTaskID:  s.chatThreadTaskID(ctx, task.ID),
 			FailureReason: pgtype.Text{String: failureReason, Valid: failureReason != ""},
 			ElapsedMs:     computeChatElapsedMs(task),
 		}); err != nil {
@@ -2150,6 +2189,9 @@ func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTa
 	if task.ChatSessionID.Valid {
 		payload["chat_session_id"] = util.UUIDToString(task.ChatSessionID)
 	}
+	if task.ChatThreadID.Valid {
+		payload["chat_thread_id"] = util.UUIDToString(task.ChatThreadID)
+	}
 
 	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
 	if workspaceID == "" {
@@ -2177,6 +2219,9 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 	}
 	if task.ChatSessionID.Valid {
 		payload["chat_session_id"] = util.UUIDToString(task.ChatSessionID)
+	}
+	if task.ChatThreadID.Valid {
+		payload["chat_thread_id"] = util.UUIDToString(task.ChatThreadID)
 	}
 	s.Bus.Publish(events.Event{
 		Type:        eventType,
@@ -2227,11 +2272,15 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 	}
 	payload := protocol.ChatDonePayload{
 		ChatSessionID: util.UUIDToString(task.ChatSessionID),
+		ChatThreadID:  util.UUIDToString(task.ChatThreadID),
 		TaskID:        util.UUIDToString(task.ID),
 	}
 	if msg != nil {
 		payload.MessageID = util.UUIDToString(msg.ID)
 		payload.Content = msg.Content
+		if msg.ThreadTaskID.Valid {
+			payload.ThreadTaskID = util.UUIDToString(msg.ThreadTaskID)
+		}
 		if msg.CreatedAt.Valid {
 			payload.CreatedAt = msg.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
 		}
@@ -2247,6 +2296,18 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 		ChatSessionID: util.UUIDToString(task.ChatSessionID),
 		Payload:       payload,
 	})
+}
+
+func (s *TaskService) chatThreadTaskID(ctx context.Context, taskID pgtype.UUID) pgtype.UUID {
+	threadTaskID, err := s.Queries.GetChatThreadTaskIDByTask(ctx, taskID)
+	if err != nil {
+		slog.Warn("failed to resolve chat thread id",
+			"task_id", util.UUIDToString(taskID),
+			"error", err,
+		)
+		return taskID
+	}
+	return threadTaskID
 }
 
 func (s *TaskService) broadcastIssueUpdated(issue db.Issue) {

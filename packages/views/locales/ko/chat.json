@@ -82,6 +82,21 @@
     "history_group": "채팅 기록",
     "agent_filter_placeholder": "에이전트 검색..."
   },
+  "page": {
+    "chat_tab": "채팅",
+    "show_profile": "프로필 보기"
+  },
+  "thread": {
+    "title": "{{name}}의 스레드",
+    "replying": "답변 중",
+    "reply_one": "답글 1개",
+    "reply_other": "답글 {{count}}개",
+    "today_at": "오늘 {{time}}",
+    "input_placeholder": "스레드에 답글 쓰기…",
+    "load_older": "이전 메시지 불러오기",
+    "close": "스레드 닫기",
+    "resize": "스레드 패널 너비 조절"
+  },
   "empty_state": {
     "first_time_title": "에이전트와 채팅하기",
     "first_time_intro": "✨ 에이전트는 내 워크스페이스를 알고 있습니다 —",

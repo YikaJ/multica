@@ -101,6 +101,7 @@ type AgentTaskQueue struct {
 	InitiatorUserID       pgtype.UUID        `json:"initiator_user_id"`
 	HandoffNote           pgtype.Text        `json:"handoff_note"`
 	PrepareLeaseExpiresAt pgtype.Timestamptz `json:"prepare_lease_expires_at"`
+	ChatThreadID          pgtype.UUID        `json:"chat_thread_id"`
 }
 
 type Attachment struct {
@@ -262,6 +263,19 @@ type ChannelUserBinding struct {
 	BoundAt        pgtype.Timestamptz `json:"bound_at"`
 }
 
+type ChatAgentSession struct {
+	ID                pgtype.UUID        `json:"id"`
+	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`
+	ChatThreadID      pgtype.UUID        `json:"chat_thread_id"`
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	RuntimeID         pgtype.UUID        `json:"runtime_id"`
+	ProviderSessionID pgtype.Text        `json:"provider_session_id"`
+	WorkDir           pgtype.Text        `json:"work_dir"`
+	Status            string             `json:"status"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ChatMessage struct {
 	ID            pgtype.UUID        `json:"id"`
 	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
@@ -271,21 +285,42 @@ type ChatMessage struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	FailureReason pgtype.Text        `json:"failure_reason"`
 	ElapsedMs     pgtype.Int8        `json:"elapsed_ms"`
+	ThreadTaskID  pgtype.UUID        `json:"thread_task_id"`
+	ChatThreadID  pgtype.UUID        `json:"chat_thread_id"`
 }
 
 type ChatSession struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	AgentID     pgtype.UUID        `json:"agent_id"`
-	CreatorID   pgtype.UUID        `json:"creator_id"`
-	Title       string             `json:"title"`
-	SessionID   pgtype.Text        `json:"session_id"`
-	WorkDir     pgtype.Text        `json:"work_dir"`
-	Status      string             `json:"status"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	UnreadSince pgtype.Timestamptz `json:"unread_since"`
-	RuntimeID   pgtype.UUID        `json:"runtime_id"`
+	ID                        pgtype.UUID        `json:"id"`
+	WorkspaceID               pgtype.UUID        `json:"workspace_id"`
+	AgentID                   pgtype.UUID        `json:"agent_id"`
+	CreatorID                 pgtype.UUID        `json:"creator_id"`
+	Title                     string             `json:"title"`
+	SessionID                 pgtype.Text        `json:"session_id"`
+	WorkDir                   pgtype.Text        `json:"work_dir"`
+	Status                    string             `json:"status"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                 pgtype.Timestamptz `json:"updated_at"`
+	UnreadSince               pgtype.Timestamptz `json:"unread_since"`
+	RuntimeID                 pgtype.UUID        `json:"runtime_id"`
+	ScopeType                 string             `json:"scope_type"`
+	ScopeID                   pgtype.UUID        `json:"scope_id"`
+	Source                    string             `json:"source"`
+	Visibility                string             `json:"visibility"`
+	ExternalRef               []byte             `json:"external_ref"`
+	SupersededByChatSessionID pgtype.UUID        `json:"superseded_by_chat_session_id"`
+}
+
+type ChatThread struct {
+	ID                  pgtype.UUID        `json:"id"`
+	ChatSessionID       pgtype.UUID        `json:"chat_session_id"`
+	LegacyChatSessionID pgtype.UUID        `json:"legacy_chat_session_id"`
+	LegacyThreadTaskID  pgtype.UUID        `json:"legacy_thread_task_id"`
+	RootMessageID       pgtype.UUID        `json:"root_message_id"`
+	Title               string             `json:"title"`
+	Status              string             `json:"status"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Comment struct {

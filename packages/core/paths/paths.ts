@@ -27,6 +27,7 @@ function workspaceScoped(slug: string) {
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,
     agents: () => `${ws}/agents`,
     agentDetail: (id: string) => `${ws}/agents/${encode(id)}`,
+    agentChat: (id: string) => `${ws}/agents/${encode(id)}/chat`,
     memberDetail: (id: string) => `${ws}/members/${encode(id)}`,
     squads: () => `${ws}/squads`,
     squadDetail: (id: string) => `${ws}/squads/${encode(id)}`,
@@ -55,6 +56,11 @@ export const paths = {
 };
 
 export type WorkspacePaths = ReturnType<typeof workspaceScoped>;
+
+export function isAgentChatPath(path: string): boolean {
+  const pathname = path.split("?")[0]?.replace(/\/+$/, "") ?? path;
+  return /^\/[^/]+\/agents\/[^/]+\/chat$/.test(pathname);
+}
 
 // Prefixes — not slug names — because we match against full URL paths.
 // A path is global if it equals or begins with any of these.

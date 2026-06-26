@@ -1888,6 +1888,31 @@ func TestCreatePinRejectsMalformedItemID(t *testing.T) {
 	}
 }
 
+func TestCreatePinAllowsAgent(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Agent Pin", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/pins", map[string]any{
+		"item_type": "agent",
+		"item_id":   agentID,
+	})
+	testHandler.CreatePin(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreatePin: expected 201 for agent pin, got %d: %s", w.Code, w.Body.String())
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM pinned_item WHERE item_type = 'agent' AND item_id = $1`, agentID)
+	})
+
+	var resp PinnedItemResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode pin response: %v", err)
+	}
+	if resp.ItemType != "agent" || resp.ItemID != agentID {
+		t.Fatalf("CreatePin response = (%q, %q), want agent %q", resp.ItemType, resp.ItemID, agentID)
+	}
+}
+
 func TestUpdateWorkspaceRejectsMalformedID(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/workspaces/not-a-uuid", map[string]any{

@@ -194,6 +194,10 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 		AgentID:     in.AgentID,
 		CreatorID:   in.Sender,
 		Title:       s.titles.forType(in.ChatType),
+		ScopeType:   pgtype.Text{String: "channel", Valid: true},
+		ScopeID:     in.InstallationID,
+		Source:      pgtype.Text{String: string(s.channelType), Valid: true},
+		Visibility:  pgtype.Text{String: "shared", Valid: true},
 	})
 	if err != nil {
 		return pgtype.UUID{}, fmt.Errorf("create chat session: %w", err)

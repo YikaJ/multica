@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
+.PHONY: help makehelp dev dev-desktop server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree start-desktop-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -257,6 +257,9 @@ setup-worktree: ## Ensure .env.worktree exists, then prepare this worktree
 start-worktree: ## Start this worktree using .env.worktree
 	@$(MAKE) start ENV_FILE=$(WORKTREE_ENV_FILE)
 
+start-desktop-worktree: ## Start this worktree's isolated backend + desktop app with hot reload
+	@bash scripts/dev-desktop.sh $(WORKTREE_ENV_FILE)
+
 stop-worktree: ## Stop this worktree's backend and frontend processes
 	@$(MAKE) stop ENV_FILE=$(WORKTREE_ENV_FILE)
 
@@ -268,6 +271,9 @@ check-worktree: ## Run the full verification pipeline for this worktree
 
 dev: ## Bootstrap this checkout end-to-end: create env if needed, ensure DB, migrate, start services
 	@bash scripts/dev.sh
+
+dev-desktop: ## Bootstrap this checkout and start backend + desktop app with hot reload
+	@bash scripts/dev-desktop.sh
 
 server: ## Run only the Go server for the current checkout
 	$(REQUIRE_ENV)

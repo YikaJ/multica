@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { detail, deletePin, navigation, pins, summary, workspaces } = vi.hoisted(() => ({
+const { agents, detail, deletePin, navigation, pins, summary, workspaces } = vi.hoisted(() => ({
+  agents: {
+    current: [] as { id: string; name: string; archived_at: string | null }[],
+  },
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
   deletePin: vi.fn(),
   navigation: { current: { pathname: "/acme/issues" } },
@@ -17,7 +20,7 @@ const { detail, deletePin, navigation, pins, summary, workspaces } = vi.hoisted(
         id: "pin-1",
         workspace_id: "ws-1",
         user_id: "user-1",
-        item_type: "issue" as const,
+        item_type: "issue" as "issue" | "project" | "agent",
         item_id: "issue-1",
         position: 0,
         created_at: "2026-05-06T00:00:00Z",
@@ -51,13 +54,15 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   SidebarMenuButton: ({
     children,
     isActive,
+    onClick,
     render,
   }: {
     children: React.ReactNode;
     isActive?: boolean;
+    onClick?: React.MouseEventHandler<HTMLButtonElement>;
     render?: React.ReactElement<{ href?: string }>;
   }) => (
-    <button type="button" data-active={isActive ? "true" : undefined} data-href={render?.props.href}>
+    <button type="button" data-active={isActive ? "true" : undefined} data-href={render?.props.href} onClick={onClick}>
       {children}
     </button>
   ),
@@ -92,6 +97,7 @@ vi.mock("../navigation", () => ({
 }));
 vi.mock("../projects/components/project-icon", () => ({ ProjectIcon: () => <span /> }));
 vi.mock("../workspace/workspace-avatar", () => ({ WorkspaceAvatar: () => <span /> }));
+vi.mock("../common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
 vi.mock("@multica/ui/components/common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
 
 vi.mock("@multica/core/auth", () => ({
@@ -114,6 +120,7 @@ vi.mock("@multica/core/paths", () => ({
     settings: () => "/acme/settings",
     issueDetail: (id: string) => `/acme/issues/${id}`,
     projectDetail: (id: string) => `/acme/projects/${id}`,
+    agentChat: (id: string) => `/acme/agents/${id}/chat`,
   }),
 }));
 vi.mock("@multica/core/api", async (importOriginal) => {
@@ -149,6 +156,7 @@ vi.mock("@multica/core/pins/queries", () => ({ pinListOptions: () => ({ queryKey
 vi.mock("@multica/core/projects/queries", () => ({ projectDetailOptions: () => ({ queryKey: ["project"] }) }));
 vi.mock("@multica/core/runtimes/hooks", () => ({ useMyRuntimesNeedUpdate: () => false }));
 vi.mock("@multica/core/workspace/queries", () => ({
+  agentListOptions: () => ({ queryKey: ["agents"] }),
   myInvitationListOptions: () => ({ queryKey: ["invitations"] }),
   workspaceKeys: { myInvitations: () => ["invitations"] },
   workspaceListOptions: () => ({ queryKey: ["workspaces"] }),
@@ -159,6 +167,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
     if (queryKey[0] === "pins") return { data: pins.current };
     if (queryKey[0] === "issue") return detail.current;
+    if (queryKey[0] === "agents") return { data: agents.current, isPending: false, isError: false };
     if (queryKey[0] === "inbox" && queryKey[1] === "unread-summary") return { data: summary.current };
     if (queryKey[0] === "workspaces") return { data: workspaces.current };
     return { data: [] };
@@ -168,9 +177,21 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
 
 describe("PinRow", () => {
   beforeEach(() => {
+    agents.current = [];
     deletePin.mockReset();
     navigation.current.pathname = "/acme/issues";
     detail.current = { isPending: false, isError: false, data: null, error: null };
+    pins.current = [
+      {
+        id: "pin-1",
+        workspace_id: "ws-1",
+        user_id: "user-1",
+        item_type: "issue",
+        item_id: "issue-1",
+        position: 0,
+        created_at: "2026-05-06T00:00:00Z",
+      },
+    ];
     summary.current = [];
     workspaces.current = [];
   });
@@ -210,6 +231,28 @@ describe("PinRow", () => {
       "true",
     );
     expect(container.querySelector('button[data-href="/acme/issues"]')).not.toHaveAttribute("data-active");
+  });
+
+  it("links an agent pin to the agent chat page", async () => {
+    pins.current = [
+      {
+        id: "pin-agent-1",
+        workspace_id: "ws-1",
+        user_id: "user-1",
+        item_type: "agent",
+        item_id: "agent-1",
+        position: 0,
+        created_at: "2026-05-06T00:00:00Z",
+      },
+    ];
+    agents.current = [{ id: "agent-1", name: "Onboarding Assistant", archived_at: null }];
+
+    render(<AppSidebar />);
+
+    expect((await screen.findByText("Onboarding Assistant")).closest("button")).toHaveAttribute(
+      "data-href",
+      "/acme/agents/agent-1/chat",
+    );
   });
 });
 

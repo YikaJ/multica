@@ -37,7 +37,8 @@ import {
   Users,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
-import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
+import { ActorAvatar as UiActorAvatar } from "@multica/ui/components/common/actor-avatar";
+import { ActorAvatar } from "../common/actor-avatar";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { StatusIcon } from "../issues/components/status-icon";
@@ -67,7 +68,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/paths";
-import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { workspaceListOptions, myInvitationListOptions, workspaceKeys, agentListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { inboxKeys, deduplicateInboxItems, inboxUnreadSummaryOptions, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
@@ -79,7 +80,7 @@ import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
-import type { PinnedItem } from "@multica/core/types";
+import type { Agent, PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { useT } from "../i18n";
@@ -98,6 +99,7 @@ function isNavActive(pathname: string, href: string): boolean {
 // `useEffect`/`useMemo` that depends on the value, and can trigger infinite
 // re-render loops when the effect itself calls `setState`.
 const EMPTY_PINS: PinnedItem[] = [];
+const EMPTY_AGENTS: Agent[] = [];
 const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
 const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
@@ -152,6 +154,20 @@ const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
   { key: "skills", labelKey: "skills", icon: BookOpenText },
   { key: "settings", labelKey: "settings", icon: Settings },
 ];
+
+type NonAgentPin = PinnedItem & { item_type: "issue" | "project" };
+type AgentPin = PinnedItem & { item_type: "agent" };
+
+function isAgentPin(pin: PinnedItem): pin is AgentPin {
+  return pin.item_type === "agent";
+}
+
+function isNonAgentPin(pin: PinnedItem): pin is NonAgentPin {
+  return !isAgentPin(pin);
+}
+
+const EMPTY_NON_AGENT_PINS: NonAgentPin[] = [];
+const EMPTY_AGENT_PINS: AgentPin[] = [];
 
 function DraftDot() {
   const hasDraft = useIssueDraftStore((s) => !!(s.draft.title || s.draft.description));
@@ -321,6 +337,131 @@ function PinRow({
   );
 }
 
+function SortableAgentPinItem({
+  pin,
+  agent,
+  href,
+  active,
+  onUnpin,
+}: {
+  pin: AgentPin;
+  agent: Agent;
+  href: string;
+  active: boolean;
+  onUnpin: () => void;
+}) {
+  const { t } = useT("layout");
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: pin.id });
+  const wasDragged = useRef(false);
+  const isArchived = !!agent.archived_at;
+
+  useEffect(() => {
+    if (isDragging) wasDragged.current = true;
+  }, [isDragging]);
+
+  const style = { transform: CSS.Transform.toString(transform), transition };
+
+  return (
+    <SidebarMenuItem
+      ref={setNodeRef}
+      style={style}
+      className={cn("group/pin", isDragging && "opacity-30")}
+      {...attributes}
+      {...listeners}
+    >
+      <SidebarMenuButton
+        size="sm"
+        isActive={active}
+        render={<AppLink href={href} draggable={false} />}
+        onClick={(event) => {
+          if (wasDragged.current) {
+            wasDragged.current = false;
+            event.preventDefault();
+            return;
+          }
+          if (isArchived) {
+            event.preventDefault();
+          }
+        }}
+        className={cn(
+          "text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground",
+          isDragging && "pointer-events-none",
+          isArchived && "opacity-50",
+        )}
+      >
+        <ActorAvatar
+          actorType="agent"
+          actorId={agent.id}
+          size={18}
+          className="shrink-0 rounded-md"
+          showStatusDot={!isArchived}
+        />
+        <span
+          className="min-w-0 flex-1 overflow-hidden whitespace-nowrap"
+          style={{
+            maskImage: "linear-gradient(to right, black calc(100% - 12px), transparent)",
+            WebkitMaskImage: "linear-gradient(to right, black calc(100% - 12px), transparent)",
+          }}
+        >{agent.name}</span>
+        <Tooltip>
+          <TooltipTrigger
+            render={<span role="button" />}
+            className="hidden size-2.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground group-hover/pin:flex hover:text-foreground"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onUnpin();
+            }}
+          >
+            <X className="size-1" />
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={4}>{t(($) => $.sidebar.unpin_tooltip)}</TooltipContent>
+        </Tooltip>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
+function AgentPinRow({
+  pin,
+  wsId,
+  href,
+  active,
+  onUnpin,
+}: {
+  pin: AgentPin;
+  wsId: string;
+  href: string;
+  active: boolean;
+  onUnpin: () => void;
+}) {
+  const { data: agents = EMPTY_AGENTS, isPending, isError } = useQuery({
+    ...agentListOptions(wsId),
+    enabled: !!wsId,
+  });
+  const agent = agents.find((a) => a.id === pin.item_id) ?? null;
+  const triggeredRef = useRef(false);
+
+  useEffect(() => {
+    if (isPending || isError || agent || triggeredRef.current) return;
+    triggeredRef.current = true;
+    onUnpin();
+  }, [agent, isError, isPending, onUnpin]);
+
+  if (isPending) return <PinSkeleton />;
+  if (isError || !agent) return null;
+
+  return (
+    <SortableAgentPinItem
+      pin={pin}
+      agent={agent}
+      href={href}
+      active={active}
+      onUnpin={onUnpin}
+    />
+  );
+}
+
 function PinSkeleton() {
   return (
     <SidebarMenuItem>
@@ -330,6 +471,21 @@ function PinSkeleton() {
       </div>
     </SidebarMenuItem>
   );
+}
+
+function reorderPinnedSubset(
+  pins: PinnedItem[],
+  activeId: string,
+  overId: string,
+  predicate: (pin: PinnedItem) => boolean,
+) {
+  const subset = pins.filter(predicate);
+  const oldIndex = subset.findIndex((p) => p.id === activeId);
+  const newIndex = subset.findIndex((p) => p.id === overId);
+  if (oldIndex === -1 || newIndex === -1) return null;
+  const reorderedSubset = arrayMove(subset, oldIndex, newIndex);
+  let cursor = 0;
+  return pins.map((pin) => (predicate(pin) ? reorderedSubset[cursor++] ?? pin : pin));
 }
 
 interface AppSidebarProps {
@@ -390,7 +546,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
   const getPinHref = useCallback(
-    (pin: PinnedItem) => (pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.projectDetail(pin.item_id)),
+    (pin: NonAgentPin) => (pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.projectDetail(pin.item_id)),
+    [p],
+  );
+  const getAgentPinHref = useCallback(
+    (pin: AgentPin) => p.agentChat(pin.item_id),
     [p],
   );
 
@@ -409,21 +569,28 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   useEffect(() => {
     setLocalPinnedWsId(wsId ?? null);
   }, [wsId]);
-  const visiblePinned = localPinnedWsId === (wsId ?? null) ? localPinned : EMPTY_PINS;
-  const isActivePinnedRoute = visiblePinned.some((pin) => pathname === getPinHref(pin));
+  const visiblePinned = localPinnedWsId === (wsId ?? null) ? localPinned.filter(isNonAgentPin) : EMPTY_NON_AGENT_PINS;
+  const visibleAgentPins = localPinnedWsId === (wsId ?? null) ? localPinned.filter(isAgentPin) : EMPTY_AGENT_PINS;
+  const isActivePinnedRoute =
+    visiblePinned.some((pin) => pathname === getPinHref(pin)) ||
+    visibleAgentPins.some((pin) => pathname === getAgentPinHref(pin));
 
   const handleDragStart = useCallback(() => {
     isDraggingRef.current = true;
   }, []);
-  const handleDragEnd = useCallback(
+  const handleDragEndFor = useCallback(
+    (predicate: (pin: PinnedItem) => boolean) =>
     (event: DragEndEvent) => {
       isDraggingRef.current = false;
       const { active, over } = event;
       if (!over || active.id === over.id) return;
-      const oldIndex = localPinned.findIndex((p) => p.id === active.id);
-      const newIndex = localPinned.findIndex((p) => p.id === over.id);
-      if (oldIndex === -1 || newIndex === -1) return;
-      const reordered = arrayMove(localPinned, oldIndex, newIndex);
+      const reordered = reorderPinnedSubset(
+        localPinned,
+        String(active.id),
+        String(over.id),
+        predicate,
+      );
+      if (!reordered) return;
       setLocalPinned(reordered);
       reorderPins.mutate(reordered);
     },
@@ -523,7 +690,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   sideOffset={4}
                 >
                   <div className="flex items-center gap-2.5 px-2 py-1.5">
-                    <ActorAvatar
+                    <UiActorAvatar
                       name={user?.name ?? ""}
                       initials={(user?.name ?? "U").charAt(0).toUpperCase()}
                       avatarUrl={resolvePublicFileUrl(user?.avatar_url)}
@@ -690,10 +857,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 </SidebarGroupLabel>
                 <CollapsibleContent>
                   <SidebarGroupContent>
-                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEndFor(isNonAgentPin)}>
                       <SortableContext items={visiblePinned.map((p) => p.id)} strategy={verticalListSortingStrategy}>
                         <SidebarMenu className="gap-0.5">
-                          {visiblePinned.map((pin: PinnedItem) => (
+                          {visiblePinned.map((pin) => (
                             <PinRow
                               key={pin.id}
                               pin={pin}
@@ -701,6 +868,41 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                               pathname={pathname}
                               onUnpin={() => deletePin.mutate({ itemType: pin.item_type, itemId: pin.item_id })}
                               wsId={wsId ?? ""}
+                            />
+                          ))}
+                        </SidebarMenu>
+                      </SortableContext>
+                    </DndContext>
+                  </SidebarGroupContent>
+                </CollapsibleContent>
+              </SidebarGroup>
+            </Collapsible>
+          )}
+
+          {visibleAgentPins.length > 0 && (
+            <Collapsible defaultOpen>
+              <SidebarGroup className="group/pinned">
+                <SidebarGroupLabel
+                  render={<CollapsibleTrigger />}
+                  className="group/trigger cursor-pointer hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
+                >
+                  <span>{t(($) => $.sidebar.agents_label)}</span>
+                  <ChevronRight className="!size-3 ml-1 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90" />
+                  <span className="ml-auto text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover/pinned:opacity-100">{visibleAgentPins.length}</span>
+                </SidebarGroupLabel>
+                <CollapsibleContent>
+                  <SidebarGroupContent>
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEndFor(isAgentPin)}>
+                      <SortableContext items={visibleAgentPins.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+                        <SidebarMenu className="gap-0.5">
+                          {visibleAgentPins.map((pin) => (
+                            <AgentPinRow
+                              key={pin.id}
+                              pin={pin}
+                              wsId={wsId ?? ""}
+                              href={getAgentPinHref(pin)}
+                              active={pathname === getAgentPinHref(pin)}
+                              onUnpin={() => deletePin.mutate({ itemType: pin.item_type, itemId: pin.item_id })}
                             />
                           ))}
                         </SidebarMenu>

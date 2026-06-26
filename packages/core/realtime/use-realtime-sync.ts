@@ -109,9 +109,11 @@ export function applyChatDoneToCache(
     const assistant: ChatMessage = {
       id: messageId,
       chat_session_id: sessionId,
+      chat_thread_id: payload.chat_thread_id ?? null,
       role: "assistant",
       content,
       task_id: taskId,
+      thread_task_id: payload.thread_task_id ?? taskId,
       created_at: payload.created_at ?? new Date().toISOString(),
       elapsed_ms: payload.elapsed_ms ?? null,
     };

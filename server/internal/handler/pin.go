@@ -11,7 +11,7 @@ import (
 
 // PinnedItemResponse carries pin metadata only. Title / status / identifier /
 // icon are intentionally NOT included — clients derive them from their own
-// issue / project query cache so that an `issue:updated` event flows naturally
+// issue / project / agent query cache so entity update events flow naturally
 // into the sidebar without needing a cross-entity invalidate on `pinKeys`.
 type PinnedItemResponse struct {
 	ID          string  `json:"id"`
@@ -49,6 +49,10 @@ type ReorderItem struct {
 	Position float64 `json:"position"`
 }
 
+func isPinnedItemType(itemType string) bool {
+	return itemType == "issue" || itemType == "project" || itemType == "agent"
+}
+
 func (h *Handler) ListPins(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -84,8 +88,8 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.ItemType != "issue" && req.ItemType != "project" {
-		writeError(w, http.StatusBadRequest, "item_type must be 'issue' or 'project'")
+	if !isPinnedItemType(req.ItemType) {
+		writeError(w, http.StatusBadRequest, "item_type must be 'issue', 'project', or 'agent'")
 		return
 	}
 	if req.ItemID == "" {
@@ -116,6 +120,19 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 			ID: itemUUID, WorkspaceID: wsUUID,
 		}); err != nil {
 			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+	case "agent":
+		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID: itemUUID, WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+			writeError(w, http.StatusForbidden, "you do not have access to this agent")
 			return
 		}
 	}
@@ -159,6 +176,11 @@ func (h *Handler) DeletePin(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	itemType := chi.URLParam(r, "itemType")
 	itemID := chi.URLParam(r, "itemId")
+
+	if !isPinnedItemType(itemType) {
+		writeError(w, http.StatusBadRequest, "item_type must be 'issue', 'project', or 'agent'")
+		return
+	}
 
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {

@@ -6,6 +6,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useChatStore } from "@multica/core/chat";
 import { chatSessionsOptions, pendingChatTasksOptions } from "@multica/core/chat/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { isAgentChatPath } from "@multica/core/paths";
 import { createLogger } from "@multica/core/logger";
 import {
   Tooltip,
@@ -13,18 +14,20 @@ import {
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
 import { useT } from "../../i18n";
+import { useNavigation } from "../../navigation";
 
 const logger = createLogger("chat.ui");
 
 export function ChatFab() {
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
+  const { pathname } = useNavigation();
   const isOpen = useChatStore((s) => s.isOpen);
   const toggle = useChatStore((s) => s.toggle);
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
   const { data: pending } = useQuery(pendingChatTasksOptions(wsId));
 
-  if (isOpen) return null;
+  if (isOpen || isAgentChatPath(pathname)) return null;
 
   const unreadSessionCount = sessions.filter((s) => s.has_unread).length;
   const isRunning = (pending?.tasks ?? []).length > 0;

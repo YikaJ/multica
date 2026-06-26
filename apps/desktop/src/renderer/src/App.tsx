@@ -366,9 +366,10 @@ export default function App() {
     [systemLocale],
   );
   const locale = useMemo(() => pickLocale(localeAdapter), [localeAdapter]);
+  const localeResources = RESOURCES[locale];
   const resources = useMemo(
-    () => ({ [locale]: RESOURCES[locale] }),
-    [locale],
+    () => ({ [locale]: localeResources }),
+    [locale, localeResources],
   );
 
   // Keep <html lang> in sync with the resolved locale (index.html hardcodes

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { paths, isGlobalPath } from "./paths";
+import { paths, isAgentChatPath, isGlobalPath } from "./paths";
 
 describe("paths.workspace(slug)", () => {
   const ws = paths.workspace("acme");
@@ -13,6 +13,7 @@ describe("paths.workspace(slug)", () => {
     expect(ws.autopilots()).toBe("/acme/autopilots");
     expect(ws.autopilotDetail("a1")).toBe("/acme/autopilots/a1");
     expect(ws.agents()).toBe("/acme/agents");
+    expect(ws.agentChat("agent-1")).toBe("/acme/agents/agent-1/chat");
     expect(ws.memberDetail("u1")).toBe("/acme/members/u1");
     expect(ws.inbox()).toBe("/acme/inbox");
     expect(ws.myIssues()).toBe("/acme/my-issues");
@@ -50,5 +51,17 @@ describe("isGlobalPath", () => {
   it("returns false for workspace-scoped paths", () => {
     expect(isGlobalPath("/acme/issues")).toBe(false);
     expect(isGlobalPath("/")).toBe(false);
+  });
+});
+
+describe("isAgentChatPath", () => {
+  it("matches workspace-scoped agent chat pages", () => {
+    expect(isAgentChatPath("/acme/agents/agent-1/chat")).toBe(true);
+    expect(isAgentChatPath("/acme/agents/agent-1/chat/")).toBe(true);
+  });
+
+  it("does not match the agent profile page", () => {
+    expect(isAgentChatPath("/acme/agents/agent-1")).toBe(false);
+    expect(isAgentChatPath("/acme/agents")).toBe(false);
   });
 });

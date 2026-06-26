@@ -26,9 +26,17 @@ export interface PendingChatTasksResponse {
 export interface ChatMessage {
   id: string;
   chat_session_id: string;
+  chat_thread_id?: string | null;
+  /**
+   * Client-only optimistic grouping key. The backend never sends this field.
+   * It keeps an in-flight thread reply visually attached to the selected
+   * thread even when the historical root row is grouped by a task-id fallback.
+   */
+  client_thread_id?: string | null;
   role: "user" | "assistant";
   content: string;
   task_id: string | null;
+  thread_task_id?: string | null;
   created_at: string;
   /**
    * Attachments linked to this message via the attachment table's
@@ -72,6 +80,8 @@ export interface ChatMessagesPage {
 export interface SendChatMessageResponse {
   message_id: string;
   task_id: string;
+  thread_task_id: string;
+  thread_id?: string;
   /**
    * Server-authoritative task creation time. Optimistic StatusPill seed
    * uses this as its anchor so the timer starts from the real `0s` —

@@ -19,6 +19,7 @@ import type {
   AgentRuntime,
   CreateAgentRequest,
   MemberWithUser,
+  PinnedItem,
 } from "@multica/core/types";
 import {
   type AgentActivity,
@@ -40,6 +41,7 @@ import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import {
   agentListOptions,
   memberListOptions,
@@ -115,6 +117,7 @@ const COLUMN_WIDTHS: Record<AgentColumnKey, number> = {
 // 11 gap-x-3 gaps between the wide template's 12 tracks (zero-width tracks
 // still carry gaps).
 const FIXED_TRACKS_WIDTH = 268 + 11 * 12;
+const EMPTY_PINS: PinnedItem[] = [];
 
 function columnTrackVars(
   isVisible: (key: AgentColumnKey) => boolean,
@@ -804,6 +807,10 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     error: listError,
     refetch: refetchList,
   } = useQuery(agentListOptions(wsId));
+  const { data: pins = EMPTY_PINS } = useQuery({
+    ...pinListOptions(wsId, currentUser?.id ?? ""),
+    enabled: !!wsId && !!currentUser?.id,
+  });
   const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
     runtimeListOptions(wsId),
   );
@@ -811,6 +818,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const { data: runCountsRaw = [] } = useQuery(agentRunCounts30dOptions(wsId));
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
+  const createPin = useCreatePin();
+  const deletePin = useDeletePin();
 
   const [showCreate, setShowCreate] = useState(false);
   const [duplicateTemplate, setDuplicateTemplate] = useState<Agent | null>(
@@ -885,6 +894,25 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     }
     return { mine, all, archived };
   }, [agents, currentUser]);
+
+  const pinnedAgentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const pin of pins) {
+      if (pin.item_type === "agent") ids.add(pin.item_id);
+    }
+    return ids;
+  }, [pins]);
+
+  const handleToggleAgentPin = useCallback(
+    (agent: Agent) => {
+      if (pinnedAgentIds.has(agent.id)) {
+        deletePin.mutate({ itemType: "agent", itemId: agent.id });
+      } else {
+        createPin.mutate({ item_type: "agent", item_id: agent.id });
+      }
+    },
+    [createPin, deletePin, pinnedAgentIds],
+  );
 
   // Rows within the current scope, unfiltered, fully assembled — the
   // toolbar's option lists and the "n / total" denominator derive from
@@ -1188,6 +1216,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                             agent={row.agent}
                             presence={row.presence}
                             canManage={row.canManage}
+                            isPinned={pinnedAgentIds.has(row.agent.id)}
+                            onTogglePin={handleToggleAgentPin}
                             onDuplicate={handleDuplicate}
                           />
                         </span>

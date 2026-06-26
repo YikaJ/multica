@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -77,6 +78,18 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
 		writeError(w, http.StatusForbidden, "you do not have access to this agent")
+		return
+	}
+
+	if existing, err := h.Queries.GetPrivateChatSessionForAgentCreator(r.Context(), db.GetPrivateChatSessionForAgentCreatorParams{
+		WorkspaceID: workspaceUUID,
+		AgentID:     agentID,
+		CreatorID:   parseUUID(userID),
+	}); err == nil {
+		writeJSON(w, http.StatusOK, chatSessionToResponse(existing))
+		return
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to resolve chat session")
 		return
 	}
 
@@ -389,11 +402,15 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 type SendChatMessageRequest struct {
 	Content       string   `json:"content"`
 	AttachmentIDs []string `json:"attachment_ids"`
+	ChatThreadID string   `json:"chat_thread_id"`
+	ReplyToTaskID string   `json:"reply_to_task_id"`
 }
 
 type SendChatMessageResponse struct {
-	MessageID string `json:"message_id"`
-	TaskID    string `json:"task_id"`
+	MessageID    string `json:"message_id"`
+	TaskID       string `json:"task_id"`
+	ThreadTaskID string `json:"thread_task_id"`
+	ThreadID     string `json:"thread_id"`
 	// AttachmentIDs are the attachment rows actually bound to this message by
 	// the server. The client diffs these against the ids it requested so it
 	// can warn the user when an attachment silently failed to bind — no extra
@@ -456,11 +473,85 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	threadTaskID := pgtype.UUID{}
+	chatThreadID := pgtype.UUID{}
+	if req.ChatThreadID != "" {
+		requestedChatThreadID, ok := parseUUIDOrBadRequest(w, req.ChatThreadID, "chat_thread_id")
+		if !ok {
+			return
+		}
+		if _, err := h.Queries.GetChatThreadInSession(r.Context(), db.GetChatThreadInSessionParams{
+			ID:            requestedChatThreadID,
+			ChatSessionID: session.ID,
+		}); errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusBadRequest, "reply thread not found")
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve reply thread")
+			return
+		}
+		resolvedThreadTaskID, err := h.Queries.ResolveChatThreadTaskIDByThreadID(r.Context(), db.ResolveChatThreadTaskIDByThreadIDParams{
+			ChatSessionID: session.ID,
+			ChatThreadID:  requestedChatThreadID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusBadRequest, "reply thread not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve reply thread")
+			return
+		}
+		threadTaskID = resolvedThreadTaskID
+		chatThreadID = requestedChatThreadID
+	} else if req.ReplyToTaskID != "" {
+		requestedThreadTaskID, ok := parseUUIDOrBadRequest(w, req.ReplyToTaskID, "reply_to_task_id")
+		if !ok {
+			return
+		}
+		resolvedThreadTaskID, err := h.Queries.ResolveChatThreadTaskID(r.Context(), db.ResolveChatThreadTaskIDParams{
+			ChatSessionID: session.ID,
+			TaskID:        requestedThreadTaskID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusBadRequest, "reply thread not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve reply thread")
+			return
+		}
+		threadTaskID = resolvedThreadTaskID
+		resolvedChatThreadID, err := h.resolveOrCreateChatThreadForTaskID(r.Context(), session, resolvedThreadTaskID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusBadRequest, "reply thread not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve reply thread")
+			return
+		}
+		chatThreadID = resolvedChatThreadID
+	} else {
+		thread, err := h.Queries.CreateChatThread(r.Context(), db.CreateChatThreadParams{
+			ChatSessionID: session.ID,
+			Title:         strings.TrimSpace(req.Content),
+			CreatedBy:     parseUUID(userID),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create chat thread")
+			return
+		}
+		chatThreadID = thread.ID
+	}
+
 	// Create the user message first so the daemon can always find it.
 	msg, err := h.Queries.CreateChatMessage(r.Context(), db.CreateChatMessageParams{
 		ChatSessionID: session.ID,
+		ChatThreadID:  chatThreadID,
 		Role:          "user",
 		Content:       req.Content,
+		ThreadTaskID:  threadTaskID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create chat message")
@@ -497,14 +588,15 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// Enqueue a chat task after the message exists. For web chat the sender is
 	// the authenticated request user (sessions are creator-only), so they are
 	// the task initiator — surfaced to the agent under `## Task Initiator`.
-	task, err := h.TaskService.EnqueueChatTask(r.Context(), session, parseUUID(userID), false)
+	task, err := h.TaskService.EnqueueChatTask(r.Context(), session, chatThreadID, parseUUID(userID), false)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue chat task: "+err.Error())
 		return
 	}
 	if err := h.Queries.LinkChatMessageToTask(r.Context(), db.LinkChatMessageToTaskParams{
-		ID:     msg.ID,
-		TaskID: task.ID,
+		ID:           msg.ID,
+		TaskID:       task.ID,
+		ChatThreadID: chatThreadID,
 	}); err != nil {
 		// Don't fail the send: the task already exists and the user message
 		// is persisted. The link is only needed for precise empty-cancel
@@ -535,21 +627,93 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Broadcast the user message.
 	resolvedSessionID := uuidToString(session.ID)
+	resolvedThreadTaskID := task.ID
+	if threadTaskID.Valid {
+		resolvedThreadTaskID = threadTaskID
+	} else if err := h.Queries.SetChatThreadRootMessage(r.Context(), db.SetChatThreadRootMessageParams{
+		ID:            chatThreadID,
+		RootMessageID: msg.ID,
+		Title:         req.Content,
+	}); err != nil {
+		slog.Warn("set chat thread root message failed",
+			"chat_thread_id", uuidToString(chatThreadID),
+			"message_id", uuidToString(msg.ID),
+			"error", err,
+		)
+	}
 	h.publishChat(protocol.EventChatMessage, workspaceID, "member", userID, resolvedSessionID, protocol.ChatMessagePayload{
 		ChatSessionID: resolvedSessionID,
+		ChatThreadID:  uuidToString(chatThreadID),
 		MessageID:     uuidToString(msg.ID),
 		Role:          "user",
 		Content:       req.Content,
 		TaskID:        uuidToString(task.ID),
+		ThreadTaskID:  uuidToString(resolvedThreadTaskID),
 		CreatedAt:     timestampToString(msg.CreatedAt),
 	})
 
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
 		MessageID:     uuidToString(msg.ID),
 		TaskID:        uuidToString(task.ID),
+		ThreadTaskID:  uuidToString(resolvedThreadTaskID),
+		ThreadID:      uuidToString(chatThreadID),
 		CreatedAt:     timestampToString(task.CreatedAt),
 		AttachmentIDs: boundAttachmentIDs,
 	})
+}
+
+func (h *Handler) resolveOrCreateChatThreadForTaskID(ctx context.Context, session db.ChatSession, threadTaskID pgtype.UUID) (pgtype.UUID, error) {
+	chatThreadID, err := h.Queries.ResolveChatThreadByTaskID(ctx, db.ResolveChatThreadByTaskIDParams{
+		ChatSessionID: session.ID,
+		TaskID:        threadTaskID,
+	})
+	if err == nil {
+		return chatThreadID, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return pgtype.UUID{}, err
+	}
+
+	rootMessage, err := h.Queries.GetChatThreadRootMessageByTaskID(ctx, db.GetChatThreadRootMessageByTaskIDParams{
+		ChatSessionID: session.ID,
+		TaskID:        threadTaskID,
+	})
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+
+	thread, err := h.Queries.CreateChatThread(ctx, db.CreateChatThreadParams{
+		ChatSessionID: session.ID,
+		Title:         strings.TrimSpace(rootMessage.Content),
+		CreatedBy:     session.CreatorID,
+	})
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+
+	if err := h.Queries.SetChatThreadRootMessage(ctx, db.SetChatThreadRootMessageParams{
+		ID:            thread.ID,
+		RootMessageID: rootMessage.ID,
+		Title:         rootMessage.Content,
+	}); err != nil {
+		return pgtype.UUID{}, err
+	}
+	if err := h.Queries.BackfillChatThreadForTaskID(ctx, db.BackfillChatThreadForTaskIDParams{
+		ChatSessionID: session.ID,
+		ThreadTaskID:  threadTaskID,
+		ChatThreadID:  thread.ID,
+	}); err != nil {
+		return pgtype.UUID{}, err
+	}
+	if err := h.Queries.BackfillChatTaskThreadID(ctx, db.BackfillChatTaskThreadIDParams{
+		ID:            threadTaskID,
+		ChatThreadID:  thread.ID,
+		ChatSessionID: session.ID,
+	}); err != nil {
+		return pgtype.UUID{}, err
+	}
+
+	return thread.ID, nil
 }
 
 type ChatMessagesCursorResponse struct {
@@ -981,9 +1145,11 @@ type ChatSessionResponse struct {
 type ChatMessageResponse struct {
 	ID            string  `json:"id"`
 	ChatSessionID string  `json:"chat_session_id"`
+	ChatThreadID  *string `json:"chat_thread_id"`
 	Role          string  `json:"role"`
 	Content       string  `json:"content"`
 	TaskID        *string `json:"task_id"`
+	ThreadTaskID  *string `json:"thread_task_id"`
 	CreatedAt     string  `json:"created_at"`
 	// FailureReason flags an assistant row synthesized by FailTask's chat
 	// fallback. Front-end uses it to switch to the destructive bubble.
@@ -1016,9 +1182,11 @@ func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) C
 	return ChatMessageResponse{
 		ID:            uuidToString(m.ID),
 		ChatSessionID: uuidToString(m.ChatSessionID),
+		ChatThreadID:  uuidToPtr(m.ChatThreadID),
 		Role:          m.Role,
 		Content:       m.Content,
 		TaskID:        uuidToPtr(m.TaskID),
+		ThreadTaskID:  uuidToPtr(m.ThreadTaskID),
 		CreatedAt:     timestampToString(m.CreatedAt),
 		FailureReason: textToPtr(m.FailureReason),
 		ElapsedMs:     int8ToPtr(m.ElapsedMs),

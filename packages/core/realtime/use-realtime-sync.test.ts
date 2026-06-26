@@ -80,9 +80,11 @@ describe("applyChatDoneToCache", () => {
       {
         id: "msg-assistant",
         chat_session_id: sessionId,
+        chat_thread_id: null,
         role: "assistant",
         content: "done",
         task_id: taskId,
+        thread_task_id: taskId,
         created_at: "2026-05-13T05:00:02Z",
         elapsed_ms: 1234,
       },

@@ -79,6 +79,21 @@
     "history_group": "チャット履歴",
     "agent_filter_placeholder": "エージェントを検索..."
   },
+  "page": {
+    "chat_tab": "チャット",
+    "show_profile": "プロフィールを表示"
+  },
+  "thread": {
+    "title": "{{name}} のスレッド",
+    "replying": "返信中",
+    "reply_one": "1 件の返信",
+    "reply_other": "{{count}} 件の返信",
+    "today_at": "今日 {{time}}",
+    "input_placeholder": "スレッドに返信…",
+    "load_older": "以前のメッセージを読み込む",
+    "close": "スレッドを閉じる",
+    "resize": "スレッドパネルの幅を変更"
+  },
   "empty_state": {
     "first_time_title": "エージェントとチャット",
     "first_time_intro": "✨ エージェントはあなたのワークスペースを把握しています —",

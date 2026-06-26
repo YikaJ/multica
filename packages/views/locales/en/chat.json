@@ -82,6 +82,21 @@
     "history_group": "Chat history",
     "agent_filter_placeholder": "Search agents..."
   },
+  "page": {
+    "chat_tab": "Chat",
+    "show_profile": "Show profile"
+  },
+  "thread": {
+    "title": "{{name}}'s Thread",
+    "replying": "Replying",
+    "reply_one": "1 reply",
+    "reply_other": "{{count}} replies",
+    "today_at": "Today at {{time}}",
+    "input_placeholder": "Reply in thread…",
+    "load_older": "Load older messages",
+    "close": "Close thread",
+    "resize": "Resize thread panel"
+  },
   "empty_state": {
     "first_time_title": "Chat with your agents",
     "first_time_intro": "✨ They know your workspace —",

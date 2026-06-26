@@ -524,6 +524,7 @@ const AgentTaskResponseSchema = z.object({
   failure_reason: z.string().optional(),
   created_at: z.string().default(""),
   chat_session_id: z.string().optional(),
+  chat_thread_id: z.string().optional(),
   autopilot_run_id: z.string().optional(),
   parent_task_id: z.string().optional(),
   attempt: z.number().optional(),

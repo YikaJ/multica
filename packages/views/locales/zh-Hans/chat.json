@@ -79,6 +79,20 @@
     "history_group": "历史对话",
     "agent_filter_placeholder": "搜索智能体..."
   },
+  "page": {
+    "chat_tab": "对话",
+    "show_profile": "查看资料"
+  },
+  "thread": {
+    "title": "{{name}} 的 Thread",
+    "replying": "回复中",
+    "reply_other": "{{count}} 条回复",
+    "today_at": "今天 {{time}}",
+    "input_placeholder": "在 Thread 中回复…",
+    "load_older": "加载更早的消息",
+    "close": "关闭 Thread",
+    "resize": "调整 Thread 面板宽度"
+  },
   "empty_state": {
     "first_time_title": "和你的智能体对话",
     "first_time_intro": "✨ 它们了解你的工作区——",

@@ -229,6 +229,7 @@ export interface TaskMessagePayload {
   task_id: string;
   issue_id: string;
   chat_session_id?: string;
+  chat_thread_id?: string;
   seq: number;
   type: "text" | "thinking" | "tool_use" | "tool_result" | "error";
   tool?: string;
@@ -243,6 +244,7 @@ export interface TaskQueuedPayload {
   agent_id: string;
   issue_id: string;
   chat_session_id?: string;
+  chat_thread_id?: string;
   status: string;
 }
 
@@ -252,6 +254,7 @@ export interface TaskDispatchPayload {
   issue_id: string;
   runtime_id: string;
   chat_session_id?: string;
+  chat_thread_id?: string;
 }
 
 export interface TaskRunningPayload {
@@ -259,6 +262,7 @@ export interface TaskRunningPayload {
   agent_id: string;
   issue_id: string;
   chat_session_id?: string;
+  chat_thread_id?: string;
   status: string;
 }
 
@@ -272,6 +276,7 @@ export interface TaskWaitingLocalDirectoryPayload {
   agent_id: string;
   issue_id: string;
   chat_session_id?: string;
+  chat_thread_id?: string;
   status: string;
   wait_reason?: string;
 }
@@ -281,6 +286,7 @@ export interface TaskCompletedPayload {
   agent_id: string;
   issue_id: string;
   chat_session_id?: string;
+  chat_thread_id?: string;
   status: string;
 }
 
@@ -289,6 +295,7 @@ export interface TaskFailedPayload {
   agent_id: string;
   issue_id: string;
   chat_session_id?: string;
+  chat_thread_id?: string;
   status: string;
 }
 
@@ -297,6 +304,7 @@ export interface TaskCancelledPayload {
   agent_id: string;
   issue_id: string;
   chat_session_id?: string;
+  chat_thread_id?: string;
   status: string;
 }
 
@@ -327,15 +335,18 @@ export interface IssueReactionRemovedPayload {
 
 export interface ChatMessageEventPayload {
   chat_session_id: string;
+  chat_thread_id?: string;
   message_id: string;
   role: "user" | "assistant";
   content: string;
   task_id?: string;
+  thread_task_id?: string;
   created_at: string;
 }
 
 export interface ChatDonePayload {
   chat_session_id: string;
+  chat_thread_id?: string;
   task_id: string;
   /**
    * Server populates these from the freshly-persisted assistant ChatMessage
@@ -345,6 +356,7 @@ export interface ChatDonePayload {
    */
   message_id?: string;
   content?: string;
+  thread_task_id?: string;
   elapsed_ms?: number;
   created_at?: string;
 }

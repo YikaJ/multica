@@ -1798,10 +1798,22 @@ export class ApiClient {
     sessionId: string,
     content: string,
     attachmentIds?: string[],
+    options?: { replyToTaskId?: string; chatThreadId?: string },
   ): Promise<SendChatMessageResponse> {
-    const body: { content: string; attachment_ids?: string[] } = { content };
+    const body: {
+      content: string;
+      attachment_ids?: string[];
+      reply_to_task_id?: string;
+      chat_thread_id?: string;
+    } = { content };
     if (attachmentIds && attachmentIds.length > 0) {
       body.attachment_ids = attachmentIds;
+    }
+    if (options?.chatThreadId) {
+      body.chat_thread_id = options.chatThreadId;
+    }
+    if (options?.replyToTaskId) {
+      body.reply_to_task_id = options.replyToTaskId;
     }
     return this.fetch(`/api/chat/sessions/${sessionId}/messages`, {
       method: "POST",

@@ -5,20 +5,20 @@
  *
  * Architecture invariant (matches web): `PinnedItem` only carries metadata
  * (`item_type` + `item_id`). Title / status / icon are fetched per-row via
- * `issueDetailOptions` / `projectDetailOptions`, so when an issue's status
- * or a project's title changes via `issue:updated` / `project:updated`,
- * this list updates automatically — no cross-entity invalidate on pinKeys
- * is needed. Do NOT inline the display fields into the pin row; that
- * couples this view to a stale snapshot. See packages/core/types/pin.ts
- * top comment.
+ * entity detail/list queries, so entity update events flow into the list
+ * naturally — no cross-entity invalidate on pinKeys is needed. Do NOT inline
+ * the display fields into the pin row; that couples this view to a stale
+ * snapshot. See packages/core/types/pin.ts top comment.
  *
  * Rendering split by `item_type`:
  *   - issue → existing `<IssueRow>` (used by my-issues / more/issues /
  *     project-related-issues), `showStatus` because pins are heterogeneous
  *     (no section grouping by status).
  *   - project → existing `<ProjectRow>` (used by more/projects).
+ *   - agent → compatibility fallback row; mobile does not yet have the web
+ *     sidebar's direct chat affordance here, but users can still unpin.
  *
- * Missing / no-permission rows: the detail query may 404 (issue/project
+ * Missing / no-permission rows: the detail query may 404 (issue/project/agent
  * deleted, user lost access, server returned a parseWithFallback fallback
  * with an empty id). We render a low-emphasis placeholder so the user can
  * unpin it from here — otherwise a dead pin stays forever.
@@ -133,6 +133,9 @@ function PinRow({
       <IssuePinRow pin={pin} wsId={wsId} wsSlug={wsSlug} />
     );
   }
+  if (pin.item_type === "agent") {
+    return <MissingPinRow itemType="agent" itemId={pin.item_id} />;
+  }
   return <ProjectPinRow pin={pin} wsId={wsId} wsSlug={wsSlug} />;
 }
 
@@ -211,7 +214,7 @@ function MissingPinRow({
   itemType,
   itemId,
 }: {
-  itemType: "issue" | "project";
+  itemType: "issue" | "project" | "agent";
   itemId: string;
 }) {
   const { colorScheme } = useColorScheme();

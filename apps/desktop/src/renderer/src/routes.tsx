@@ -11,6 +11,7 @@ import { ProjectDetailPage } from "./pages/project-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
+import { AgentChatPage } from "./pages/agent-chat-page";
 import { MemberDetailPage } from "./pages/member-detail-page";
 import { RuntimeDetailPage } from "./pages/runtime-detail-page";
 import { AttachmentPreviewRoute } from "./pages/attachment-preview-page";
@@ -169,6 +170,11 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Skill" },
           },
           { path: "agents", element: <DesktopAgentsPage />, handle: { title: "Agents" } },
+          {
+            path: "agents/:id/chat",
+            element: <AgentChatPage />,
+            handle: { title: "Agent Chat" },
+          },
           {
             path: "agents/:id",
             element: <AgentDetailPage />,

@@ -6,6 +6,8 @@ import {
   ArrowLeft,
   Lock,
   MoreHorizontal,
+  Pin,
+  PinOff,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -19,6 +21,7 @@ import { api, ApiError } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import {
   agentListOptions,
   memberListOptions,
@@ -69,14 +72,21 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     error: agentsError,
     refetch: refetchAgents,
   } = useQuery(agentListOptions(wsId));
+  const { data: pinnedItems = [] } = useQuery({
+    ...pinListOptions(wsId, currentUser?.id ?? ""),
+    enabled: !!wsId && !!currentUser?.id,
+  });
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const createPin = useCreatePin();
+  const deletePin = useDeletePin();
 
   // Single workspace-level presence pass; this page just reads its slot.
   // The hook owns the 30s tick so the failed-window auto-clears here too.
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
 
   const agent = agents.find((a) => a.id === agentId) ?? null;
+  const isPinned = pinnedItems.some((p) => p.item_type === "agent" && p.item_id === agentId);
   const presence: AgentPresenceDetail | null =
     agent ? presenceMap.get(agent.id) ?? null : null;
 
@@ -250,6 +260,14 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         agent={agent}
         presence={presence}
         backHref={paths.agents()}
+        isPinned={isPinned}
+        onTogglePin={() => {
+          if (isPinned) {
+            deletePin.mutate({ itemType: "agent", itemId: agent.id });
+          } else {
+            createPin.mutate({ item_type: "agent", item_id: agent.id });
+          }
+        }}
         canArchive={canEdit.allowed}
         onArchive={() => setConfirmArchive(true)}
       />
@@ -356,12 +374,16 @@ function DetailHeader({
   agent,
   presence,
   backHref,
+  isPinned,
+  onTogglePin,
   canArchive,
   onArchive,
 }: {
   agent: Agent;
   presence: AgentPresenceDetail | null;
   backHref: string;
+  isPinned: boolean;
+  onTogglePin: () => void;
   canArchive: boolean;
   onArchive: () => void;
 }) {
@@ -392,23 +414,36 @@ function DetailHeader({
         </>
       }
       actions={
-        !isArchived && canArchive ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={<Button variant="ghost" size="icon-sm" />}
+        !isArchived ? (
+          <>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className={`text-muted-foreground ${isPinned ? "text-foreground" : ""}`}
+              title={isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
+              onClick={onTogglePin}
             >
-              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-auto">
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={onArchive}
+              {isPinned ? <PinOff /> : <Pin />}
+            </Button>
+            {canArchive ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={<Button variant="ghost" size="icon-sm" />}
               >
-                <Trash2 className="h-3.5 w-3.5" />
-                {t(($) => $.detail.more_archive)}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-auto">
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={onArchive}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {t(($) => $.detail.more_archive)}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            ) : null}
+          </>
         ) : null
       }
     />

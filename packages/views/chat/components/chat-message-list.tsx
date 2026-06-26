@@ -129,7 +129,7 @@ export function ChatMessageList({
             </div>
           ),
           Footer: () => (
-            <div className="mx-auto w-full max-w-4xl px-5 pb-4 space-y-4">
+            <div className="mx-auto w-full max-w-4xl px-5 pb-3 space-y-3">
               {hasLive && (
                 <div className="w-full space-y-1.5">
                   <TimelineView items={liveTimeline} isStreaming />
@@ -146,7 +146,7 @@ export function ChatMessageList({
           ),
         }}
         itemContent={(_, msg) => (
-          <div className="mx-auto w-full max-w-4xl px-5 py-2">
+          <div className="mx-auto w-full max-w-4xl px-5 py-1.5">
             <MessageBubble
               message={msg}
               isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
@@ -197,7 +197,7 @@ function MessageBubble({ message, isPending }: { message: ChatMessage; isPending
            * render them through the same pipeline as assistant replies.
            * Neutralise prose's leading/trailing margin so single-line
            * bubbles stay as compact as the plain-text version used to. */}
-          <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+          <div className="min-w-0 overflow-x-auto prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
             <Markdown attachments={message.attachments}>{message.content}</Markdown>
           </div>
           <AttachmentList
@@ -213,7 +213,7 @@ function MessageBubble({ message, isPending }: { message: ChatMessage; isPending
   return <AssistantMessage message={message} isPending={isPending} />;
 }
 
-function AssistantMessage({
+export function AssistantMessage({
   message,
   isPending,
 }: {
@@ -253,7 +253,7 @@ function AssistantMessage({
       {timeline.length > 0 ? (
         <TimelineView items={timeline} attachments={message.attachments} />
       ) : (
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+        <div className="min-w-0 overflow-x-auto text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
           <Markdown attachments={message.attachments}>{message.content}</Markdown>
         </div>
       )}
@@ -445,7 +445,7 @@ function TimelineView({
   return (
     <>
       {preface.length > 0 && (
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+        <div className="min-w-0 overflow-x-auto text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
           <Markdown attachments={attachments}>
             {preface.map((t) => t.content ?? "").join("")}
           </Markdown>
@@ -459,7 +459,7 @@ function TimelineView({
         />
       )}
       {final.length > 0 && (
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+        <div className="min-w-0 overflow-x-auto text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
           <Markdown attachments={attachments}>
             {final.map((t) => t.content ?? "").join("")}
           </Markdown>
@@ -520,7 +520,7 @@ function MiddleTextRow({
   attachments?: import("@multica/core/types").Attachment[];
 }) {
   return (
-    <div className="py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+    <div className="min-w-0 overflow-x-auto py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
       <Markdown attachments={attachments}>{item.content ?? ""}</Markdown>
     </div>
   );

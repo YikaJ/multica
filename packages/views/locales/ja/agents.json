@@ -83,6 +83,8 @@
     "failed_suffix": " · {{count}} 回失敗（{{percent}}%）"
   },
   "row_actions": {
+    "pin_to_sidebar": "サイドバーにピン留め",
+    "unpin_from_sidebar": "サイドバーからピン留めを解除",
     "cancel_all_tasks": "すべてのタスクをキャンセル",
     "duplicate": "複製",
     "restore": "復元",
@@ -123,6 +125,8 @@
     "archive_dialog_cancel": "キャンセル",
     "archive_dialog_confirm": "アーカイブ",
     "more_archive": "エージェントをアーカイブ",
+    "pin_tooltip": "サイドバーにピン留め",
+    "unpin_tooltip": "サイドバーからピン留めを解除",
     "agent_updated_toast": "エージェントを更新しました",
     "update_failed_toast": "エージェントを更新できませんでした",
     "agent_archived_toast": "エージェントをアーカイブしました",

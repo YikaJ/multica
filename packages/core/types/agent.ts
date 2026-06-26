@@ -178,6 +178,8 @@ export interface AgentTask {
   created_at: string;
   /** Non-empty when the task was spawned from a chat session. */
   chat_session_id?: string;
+  /** Non-empty when the task is scoped to a specific chat thread. */
+  chat_thread_id?: string;
   /** Non-empty when the task was spawned by an autopilot run. */
   autopilot_run_id?: string;
   /** Set when this task was created as an auto-retry of a parent task. */

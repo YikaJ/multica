@@ -221,7 +221,11 @@ func buildChatPrompt(task Task) string {
 			}
 		}
 	}
-	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
+	if task.ChatThreadID != "" {
+		fmt.Fprintf(&b, "Thread context and latest user request:\n%s\n", task.ChatMessage)
+	} else {
+		fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
+	}
 	// List attachments by id + filename so the agent can fetch them via
 	// the CLI. We deliberately do NOT inline the URL: chat attachments
 	// live behind a signed CDN with a short TTL, so by the time the agent

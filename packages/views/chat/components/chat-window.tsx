@@ -2,8 +2,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
-import { motion } from "motion/react";
-import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Trash2, Pencil, Loader2, Square } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Trash2, Pencil, Loader2, Square, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -15,12 +15,15 @@ import {
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
+import { isAgentChatPath, useWorkspacePaths } from "@multica/core/paths";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { canAssignAgent } from "@multica/views/issues/components";
 import { api } from "@multica/core/api";
-import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/core/agents";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { useAgentPresenceDetail, useWorkspaceAgentAvailability, type AgentAvailability } from "@multica/core/agents";
+import { useFileUpload, type UploadResult } from "@multica/core/hooks/use-file-upload";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { Markdown } from "../../common/markdown";
+import { AttachmentList } from "../../issues/components/comment-card";
 import {
   PickerEmpty,
   PickerItem,
@@ -28,6 +31,7 @@ import {
   PropertyPicker,
 } from "../../issues/components/pickers/property-picker";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
+import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import { OfflineBanner } from "./offline-banner";
 import { NoAgentBanner } from "./no-agent-banner";
 import {
@@ -35,6 +39,7 @@ import {
   chatMessagesPageOptions,
   pendingChatTaskOptions,
   pendingChatTasksOptions,
+  taskMessagesOptions,
   chatKeys,
   isTaskMessageTaskId,
 } from "@multica/core/chat/queries";
@@ -45,18 +50,24 @@ import {
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
-import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
+import { AssistantMessage, ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
 import { ChatResizeHandles } from "./chat-resize-handles";
+import { TaskStatusPill } from "./task-status-pill";
 import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
 import { createLogger } from "@multica/core/logger";
-import type { Agent, Attachment, ChatMessage, ChatMessagesPage, ChatPendingTask, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
+import type { Agent, Attachment, ChatMessage, ChatMessagesPage, ChatPendingTask, ChatSession, PendingChatTasksResponse, TaskMessagePayload, User } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { AppLink, useNavigation } from "../../navigation";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
 const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
+const THREAD_PANEL_DEFAULT_WIDTH = 560;
+const THREAD_PANEL_MIN_WIDTH = 380;
+const THREAD_PANEL_MAX_WIDTH = 760;
+const THREAD_MAIN_MIN_WIDTH = 360;
 
 function appendChatMessageToLatestPageCache(
   qc: ReturnType<typeof useQueryClient>,
@@ -128,6 +139,8 @@ function replaceOptimisticChatMessageId(
   optimisticId: string,
   messageId: string,
   taskId: string,
+  threadTaskId: string,
+  chatThreadId?: string | null,
 ) {
   const replace = (messages: ChatMessage[] | undefined) => {
     if (!messages) return messages;
@@ -135,7 +148,9 @@ function replaceOptimisticChatMessageId(
       return messages.filter((m) => m.id !== optimisticId);
     }
     return messages.map((m) =>
-      m.id === optimisticId ? { ...m, id: messageId, task_id: taskId } : m,
+      m.id === optimisticId
+        ? { ...m, id: messageId, task_id: taskId, thread_task_id: threadTaskId, chat_thread_id: chatThreadId ?? m.chat_thread_id ?? null }
+        : m,
     );
   };
 
@@ -158,9 +173,34 @@ function replaceOptimisticChatMessageId(
   );
 }
 
+type ChatSurfaceMode = "floating" | "page";
+
+interface SendChatMessageOptions {
+  replyToThreadTaskId?: string;
+  chatThreadId?: string;
+  clientThreadKey?: string;
+  draftKeyScope?: string;
+}
+
+interface ChatSurfaceProps {
+  mode: ChatSurfaceMode;
+  routeAgentId?: string;
+}
+
 export function ChatWindow() {
+  return <ChatSurface mode="floating" />;
+}
+
+export function AgentChatPage({ agentId }: { agentId: string }) {
+  return <ChatSurface mode="page" routeAgentId={agentId} />;
+}
+
+function ChatSurface({ mode, routeAgentId }: ChatSurfaceProps) {
+  const pageMode = mode === "page";
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
+  const workspacePaths = useWorkspacePaths();
+  const { pathname } = useNavigation();
   const isOpen = useChatStore((s) => s.isOpen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
@@ -168,25 +208,35 @@ export function ChatWindow() {
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
   const user = useAuthStore((s) => s.user);
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: agents = [], isPending: agentsPending } = useQuery(agentListOptions(wsId));
+  const { data: members = [], isPending: membersPending } = useQuery(memberListOptions(wsId));
   // Single sessions cache — eliminates the separate active/all queries
   // that used to drift during the WS-invalidate window.
-  const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
+  const { data: sessions = [], isPending: sessionsPending } = useQuery(chatSessionsOptions(wsId));
+  const storedActiveSession = activeSessionId
+    ? sessions.find((s) => s.id === activeSessionId)
+    : null;
+  const effectiveActiveSessionId =
+    pageMode &&
+    (!storedActiveSession ||
+      storedActiveSession.agent_id !== routeAgentId ||
+      storedActiveSession.status === "archived")
+      ? null
+      : activeSessionId;
   const {
     data: rawMessagePages,
     isLoading: messagesLoading,
     fetchNextPage: fetchOlderMessages,
     hasNextPage: hasOlderMessages,
     isFetchingNextPage: isFetchingOlderMessages,
-  } = useInfiniteQuery(chatMessagesPageOptions(activeSessionId ?? ""));
+  } = useInfiniteQuery(chatMessagesPageOptions(effectiveActiveSessionId ?? ""));
   // When no active session, always show empty — don't use stale cache.
   // Page 0 contains the latest chronological window; later cursor pages are
   // older chronological windows. Reverse pages so older fetched pages render
   // above the initial latest page. The Virtuoso firstItemIndex is client-owned:
   // it starts from a large stable base and only subtracts the count of loaded
   // prepended rows, so concurrent server inserts cannot drift the scroll anchor.
-  const messagePages = activeSessionId ? rawMessagePages?.pages ?? [] : [];
+  const messagePages = effectiveActiveSessionId ? rawMessagePages?.pages ?? [] : [];
   const messages = [...messagePages].reverse().flatMap((page) => page.messages);
   const olderMessageCount = messagePages.slice(1).reduce((sum, page) => sum + page.messages.length, 0);
   const firstItemIndex = messages.length > 0
@@ -195,7 +245,7 @@ export function ChatWindow() {
   // Skeleton only shows for an un-cached session fetch. Cached switches
   // return data synchronously — no flash. `enabled: false` (new chat)
   // keeps isLoading false so the starter prompts aren't hidden.
-  const showSkeleton = !!activeSessionId && messagesLoading;
+  const showSkeleton = !!effectiveActiveSessionId && messagesLoading;
 
   // Server-authoritative pending task. Survives refresh / reopen / session
   // switch because it's keyed on sessionId in the Query cache; WS events
@@ -203,7 +253,7 @@ export function ChatWindow() {
   //
   // This is the SOLE source for pendingTaskId — no mirror in the store.
   const { data: pendingTask } = useQuery(
-    pendingChatTaskOptions(activeSessionId ?? ""),
+    pendingChatTaskOptions(effectiveActiveSessionId ?? ""),
   );
   const pendingTaskId = pendingTask?.task_id ?? null;
   const stopRequestedBeforeTaskRef = useRef(false);
@@ -212,6 +262,7 @@ export function ChatWindow() {
     content: string;
     attachments?: Attachment[];
     sessionId?: string;
+    draftKeyScope?: string;
   } | null>(null);
   const handleRestoreDraftConsumed = useCallback(() => {
     setRestoreDraftRequest(null);
@@ -221,8 +272,8 @@ export function ChatWindow() {
   // pre-existing rows with status='archived' may still exist) are excluded
   // from the history dropdown. If one is still the active session, ChatInput
   // is disabled and the server still rejects POST /messages for it.
-  const currentSession = activeSessionId
-    ? sessions.find((s) => s.id === activeSessionId)
+  const currentSession = effectiveActiveSessionId
+    ? sessions.find((s) => s.id === effectiveActiveSessionId)
     : null;
   const isSessionArchived = currentSession?.status === "archived";
 
@@ -237,17 +288,61 @@ export function ChatWindow() {
   );
 
   // Resolve selected agent: stored preference → first available
-  const activeAgent =
-    availableAgents.find((a) => a.id === selectedAgentId) ??
-    availableAgents[0] ??
-    null;
+  const routeAgent = routeAgentId
+    ? agents.find((a) => a.id === routeAgentId) ?? null
+    : null;
+  const routedAvailableAgent = routeAgentId
+    ? availableAgents.find((a) => a.id === routeAgentId) ?? null
+    : null;
+  const activeAgent = pageMode
+    ? routedAvailableAgent
+    : availableAgents.find((a) => a.id === selectedAgentId) ??
+      availableAgents[0] ??
+      null;
+  const displayAgent = routeAgent ?? activeAgent;
 
   // Three-state availability — "loading" stays neutral (no banner, no
   // disable) so the input doesn't flash a fake "no agent" state in the
   // few hundred ms before the agent list query resolves. Only `"none"`
   // (server confirmed: zero usable agents) drives the disabled UI.
   const agentAvailability = useWorkspaceAgentAvailability();
-  const noAgent = agentAvailability === "none";
+  const noAgent = pageMode ? !agentsPending && !membersPending && !activeAgent : agentAvailability === "none";
+
+  useEffect(() => {
+    if (!pageMode || !routeAgentId) return;
+
+    // The route owns the page chat target. Keep the legacy floating panel
+    // closed here so this page is the only visible chat surface.
+    if (isOpen) setOpen(false);
+    if (selectedAgentId !== routeAgentId) setSelectedAgentId(routeAgentId);
+    if (sessionsPending) return;
+
+    const activeSession = activeSessionId
+      ? sessions.find((s) => s.id === activeSessionId)
+      : null;
+    if (activeSession?.agent_id === routeAgentId && activeSession.status !== "archived") {
+      return;
+    }
+
+    const latestSession = sessions
+      .filter((s) => s.agent_id === routeAgentId && s.status !== "archived")
+      .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0] ?? null;
+    const nextSessionId = latestSession?.id ?? null;
+    if (nextSessionId !== activeSessionId) {
+      setActiveSession(nextSessionId);
+    }
+  }, [
+    activeSessionId,
+    isOpen,
+    pageMode,
+    routeAgentId,
+    selectedAgentId,
+    sessions,
+    sessionsPending,
+    setActiveSession,
+    setOpen,
+    setSelectedAgentId,
+  ]);
 
   // Presence drives both the avatar status dot (via ActorAvatar) and the
   // OfflineBanner / TaskStatusPill availability copy. `useAgentPresenceDetail`
@@ -292,14 +387,14 @@ export function ChatWindow() {
   // chat:done so a reply arriving while the user watches triggers this
   // effect again and is instantly cleared.
   const currentHasUnread =
-    sessions.find((s) => s.id === activeSessionId)?.has_unread ?? false;
+    sessions.find((s) => s.id === effectiveActiveSessionId)?.has_unread ?? false;
   useEffect(() => {
-    if (!isOpen || !activeSessionId) return;
+    if ((!isOpen && !pageMode) || !effectiveActiveSessionId) return;
     if (!currentHasUnread) return;
-    uiLogger.info("auto markRead", { sessionId: activeSessionId });
-    markRead.mutate(activeSessionId);
+    uiLogger.info("auto markRead", { sessionId: effectiveActiveSessionId });
+    markRead.mutate(effectiveActiveSessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead ref stable
-  }, [isOpen, activeSessionId, currentHasUnread]);
+  }, [isOpen, pageMode, effectiveActiveSessionId, currentHasUnread]);
 
   const { uploadWithToast } = useFileUpload(api);
 
@@ -330,7 +425,7 @@ export function ChatWindow() {
   const sessionPromiseRef = useRef<Promise<string | null> | null>(null);
   const ensureSession = useCallback(
     async (titleSeed: string): Promise<string | null> => {
-      if (activeSessionId) return activeSessionId;
+      if (effectiveActiveSessionId) return effectiveActiveSessionId;
       if (!activeAgent) return null;
       if (sessionPromiseRef.current) return sessionPromiseRef.current;
 
@@ -348,7 +443,7 @@ export function ChatWindow() {
       sessionPromiseRef.current = promise;
       return promise;
     },
-    [activeSessionId, activeAgent, createSession],
+    [effectiveActiveSessionId, activeAgent, createSession],
   );
 
   const handleUploadFile = useCallback(
@@ -367,7 +462,7 @@ export function ChatWindow() {
     async (
       taskId: string,
       sessionId: string,
-      options: { restoreDraftToInput: boolean; source: string },
+      options: { restoreDraftToInput: boolean; source: string; draftKeyScope?: string },
     ) => {
       apiLogger.info("cancelTask.start", {
         taskId,
@@ -387,6 +482,7 @@ export function ChatWindow() {
               content: restored.content,
               attachments: restored.attachments,
               sessionId: restored.chat_session_id,
+              draftKeyScope: options.draftKeyScope,
             });
           }
         }
@@ -418,6 +514,7 @@ export function ChatWindow() {
       attachmentIds?: string[],
       commitInput?: (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
       draftAttachments: Attachment[] = [],
+      options: SendChatMessageOptions = {},
     ): Promise<boolean> => {
       if (!activeAgent) {
         apiLogger.warn("sendChatMessage skipped: no active agent");
@@ -426,12 +523,15 @@ export function ChatWindow() {
 
       const finalContent = content;
 
-      const isNewSession = !activeSessionId;
+      const isNewSession = !effectiveActiveSessionId;
 
       apiLogger.info("sendChatMessage.start", {
-        sessionId: activeSessionId,
+        sessionId: effectiveActiveSessionId,
         isNewSession,
         agentId: activeAgent.id,
+        replyToThreadTaskId: options.replyToThreadTaskId,
+        chatThreadId: options.chatThreadId,
+        clientThreadKey: options.clientThreadKey,
         contentLength: finalContent.length,
         attachmentCount: attachmentIds?.length ?? 0,
       });
@@ -455,12 +555,18 @@ export function ChatWindow() {
       // sendChatMessage` and the pill blinked in a few hundred ms after the
       // user's message — small but visible "did it actually send?" gap.
       const sentAt = new Date().toISOString();
+      const optimisticId = `optimistic-${Date.now()}`;
+      const optimisticTaskId = `optimistic-${optimisticId}`;
+      const optimisticThreadTaskId = options.replyToThreadTaskId ?? optimisticTaskId;
       const optimistic: ChatMessage = {
-        id: `optimistic-${Date.now()}`,
+        id: optimisticId,
         chat_session_id: sessionId,
+        chat_thread_id: options.chatThreadId ?? null,
+        client_thread_id: options.clientThreadKey ?? null,
         role: "user",
         content: finalContent,
-        task_id: null,
+        task_id: optimisticTaskId,
+        thread_task_id: optimisticThreadTaskId,
         created_at: sentAt,
         attachments: draftAttachments,
       };
@@ -481,7 +587,7 @@ export function ChatWindow() {
       // is anchored to the local clock (drift is the request RTT, ~50–200ms,
       // which doesn't change the rendered "Ns" value).
       qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), {
-        task_id: `optimistic-${optimistic.id}`,
+        task_id: optimisticTaskId,
         status: "queued",
         created_at: sentAt,
       });
@@ -495,17 +601,23 @@ export function ChatWindow() {
       // must also count as "navigated away" even though both sides are null.
       const live = useChatStore.getState();
       const stillOnSourceSession =
-        live.activeSessionId === activeSessionId &&
-        (activeSessionId !== null || live.selectedAgentId === selectedAgentId);
+        live.activeSessionId === effectiveActiveSessionId &&
+        (effectiveActiveSessionId !== null || live.selectedAgentId === selectedAgentId);
       if (stillOnSourceSession) {
         setActiveSession(sessionId);
       }
-      commitInput?.({ extraDraftKeys: [sessionId], clearEditor: stillOnSourceSession });
+      commitInput?.({
+        extraDraftKeys: options.draftKeyScope ? [] : [sessionId],
+        clearEditor: stillOnSourceSession,
+      });
       apiLogger.debug("sendChatMessage.optimistic", { sessionId, optimisticId: optimistic.id });
 
       let result;
       try {
-        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
+        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds, {
+          replyToTaskId: options.replyToThreadTaskId,
+          chatThreadId: options.chatThreadId,
+        });
       } catch (err) {
         apiLogger.error("sendChatMessage.error.rollback", { sessionId, optimisticId: optimistic.id, err });
         stopRequestedBeforeTaskRef.current = false;
@@ -519,6 +631,7 @@ export function ChatWindow() {
           // navigated away (fire-and-forget) the request waits until they
           // return rather than dumping content into another session.
           sessionId,
+          draftKeyScope: options.draftKeyScope,
         });
         toast.error(t(($) => $.input.send_failed_toast));
         return false;
@@ -527,8 +640,18 @@ export function ChatWindow() {
         sessionId,
         messageId: result.message_id,
         taskId: result.task_id,
+        threadTaskId: result.thread_task_id,
+        chatThreadId: result.thread_id,
       });
-      replaceOptimisticChatMessageId(qc, sessionId, optimistic.id, result.message_id, result.task_id);
+      replaceOptimisticChatMessageId(
+        qc,
+        sessionId,
+        optimistic.id,
+        result.message_id,
+        result.task_id,
+        result.thread_task_id ?? result.task_id,
+        result.thread_id ?? null,
+      );
       // Replace the temporary task_id with the server's real one (so the WS
       // task: handlers can match against it) and snap the anchor to the
       // server's created_at — keeping the elapsed-seconds reading stable.
@@ -566,7 +689,7 @@ export function ChatWindow() {
       return true;
     },
     [
-      activeSessionId,
+      effectiveActiveSessionId,
       selectedAgentId,
       activeAgent,
       ensureSession,
@@ -577,8 +700,28 @@ export function ChatWindow() {
     ],
   );
 
-  const handleStop = useCallback(() => {
-    if (!pendingTaskId || !activeSessionId) {
+  const handleThreadReplySend = useCallback(
+    (
+      chatThreadId: string | null,
+      threadTaskId: string | null,
+      clientThreadKey: string,
+      draftKeyScope: string,
+      content: string,
+      attachmentIds?: string[],
+      commitInput?: (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
+      draftAttachments: Attachment[] = [],
+    ) =>
+      handleSend(content, attachmentIds, commitInput, draftAttachments, {
+        chatThreadId: chatThreadId ?? undefined,
+        replyToThreadTaskId: threadTaskId ?? undefined,
+        clientThreadKey,
+        draftKeyScope,
+      }),
+    [handleSend],
+  );
+
+  const handleStop = useCallback((options: { draftKeyScope?: string } = {}) => {
+    if (!pendingTaskId || !effectiveActiveSessionId) {
       apiLogger.debug("cancelTask skipped: no pending task");
       return;
     }
@@ -586,15 +729,16 @@ export function ChatWindow() {
       stopRequestedBeforeTaskRef.current = true;
       apiLogger.info("cancelTask.deferred until server task id", {
         taskId: pendingTaskId,
-        sessionId: activeSessionId,
+        sessionId: effectiveActiveSessionId,
       });
       return;
     }
-    void cancelChatTask(pendingTaskId, activeSessionId, {
+    void cancelChatTask(pendingTaskId, effectiveActiveSessionId, {
       restoreDraftToInput: true,
       source: "active-input",
+      draftKeyScope: options.draftKeyScope,
     });
-  }, [pendingTaskId, activeSessionId, cancelChatTask]);
+  }, [pendingTaskId, effectiveActiveSessionId, cancelChatTask]);
 
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -606,22 +750,22 @@ export function ChatWindow() {
       uiLogger.info("selectAgent", {
         from: selectedAgentId,
         to: agent.id,
-        previousSessionId: activeSessionId,
+        previousSessionId: effectiveActiveSessionId,
       });
       setSelectedAgentId(agent.id);
       // Reset session when switching agent
       setActiveSession(null);
     },
-    [activeAgent, selectedAgentId, activeSessionId, setSelectedAgentId, setActiveSession],
+    [activeAgent, selectedAgentId, effectiveActiveSessionId, setSelectedAgentId, setActiveSession],
   );
 
   const handleNewChat = useCallback(() => {
     uiLogger.info("newChat", {
-      previousSessionId: activeSessionId,
+      previousSessionId: effectiveActiveSessionId,
       previousPendingTask: pendingTaskId,
     });
     setActiveSession(null);
-  }, [activeSessionId, pendingTaskId, setActiveSession]);
+  }, [effectiveActiveSessionId, pendingTaskId, setActiveSession]);
 
   const handleSelectSession = useCallback(
     (session: ChatSession) => {
@@ -642,11 +786,11 @@ export function ChatWindow() {
 
   const handleMinimize = useCallback(() => {
     uiLogger.info("minimize (close)", {
-      activeSessionId,
+      activeSessionId: effectiveActiveSessionId,
       pendingTaskId,
     });
     setOpen(false);
-  }, [activeSessionId, pendingTaskId, setOpen]);
+  }, [effectiveActiveSessionId, pendingTaskId, setOpen]);
 
   const isExpanded = useChatStore((s) => s.isExpanded);
 
@@ -667,27 +811,79 @@ export function ChatWindow() {
 
   const contextItems = useChatContextItems(wsId);
 
-  return (
-    <motion.div
-      ref={windowRef}
-      className={containerClass}
-      style={containerStyle}
-      initial={{ opacity: 0, scale: 0.95, width: renderWidth, height: renderHeight }}
-      animate={{
-        opacity: isVisible ? 1 : 0,
-        scale: isVisible ? 1 : 0.95,
-        width: renderWidth,
-        height: renderHeight,
-      }}
-      transition={{
-        width: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
-        height: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
-        opacity: { duration: 0.15 },
-        scale: { type: "spring", duration: 0.2, bounce: 0 },
-      }}
-    >
+  const statusBanner = noAgent ? (
+    <NoAgentBanner />
+  ) : (
+    <OfflineBanner agentName={activeAgent?.name} availability={availability} />
+  );
+
+  const composer = (
+    <ChatInput
+      onSend={handleSend}
+      restoreDraftRequest={restoreDraftRequest}
+      onRestoreDraftConsumed={handleRestoreDraftConsumed}
+      onUploadFile={handleUploadFile}
+      onStop={() => handleStop()}
+      isRunning={!!pendingTaskId}
+      disabled={isSessionArchived}
+      noAgent={noAgent}
+      agentName={displayAgent?.name ?? activeAgent?.name}
+      leftAdornment={pageMode ? undefined : (
+        <AgentDropdown
+          agents={availableAgents}
+          activeAgent={activeAgent}
+          userId={user?.id}
+          onSelect={handleSelectAgent}
+        />
+      )}
+      contextItems={contextItems}
+    />
+  );
+
+  const chatBody = (
+    <>
+      {/* Messages / skeleton / empty state */}
+      {showSkeleton ? (
+        <ChatMessageSkeleton />
+      ) : hasMessages ? (
+        <ChatMessageList
+          key={effectiveActiveSessionId}
+          messages={messages}
+          pendingTask={pendingTask}
+          availability={availability}
+          firstItemIndex={firstItemIndex}
+          hasOlderMessages={!!hasOlderMessages}
+          isFetchingOlderMessages={isFetchingOlderMessages}
+          onLoadOlderMessages={() => void fetchOlderMessages()}
+        />
+      ) : (
+        <EmptyState
+          hasSessions={sessions.length > 0}
+          agentName={displayAgent?.name ?? activeAgent?.name}
+          onPickPrompt={(text) => handleSend(text)}
+        />
+      )}
+
+      {/* Status banner above the input — single mutually-exclusive slot.
+       *  Priority: no-agent > offline / unstable. Agent presence is the
+       *  hard prerequisite (you can't send anything without one), so it
+       *  always wins over a presence hint. Recent issue/project navigation
+       *  lives in the input action row; it is not message/session state.
+       *
+       *  We key off `noAgent` (the resolved-empty state) rather than
+       *  `!activeAgent`, so the loading window between mount and the
+       *  first agent-list response stays banner-free. */}
+      {statusBanner}
+
+      {/* Input — disabled for legacy archived sessions; locked out entirely
+       *  when there's no agent (the EmptyState above carries the CTA). */}
+      {composer}
+    </>
+  );
+
+  const floatingHeader = (
+    <>
       <ChatResizeHandles onDragStart={startDrag} />
-      {/* Header — ⊕ new + session dropdown | window tools */}
       <div className="flex items-center justify-between border-b px-4 py-2.5 gap-2">
         <div className="flex items-center gap-1 min-w-0">
           <Tooltip>
@@ -710,7 +906,7 @@ export function ChatWindow() {
             // Use the full agent list (incl. archived) so historical
             // sessions can still resolve their avatar.
             agents={agents}
-            activeSessionId={activeSessionId}
+            activeSessionId={effectiveActiveSessionId}
             onSelectSession={handleSelectSession}
           />
         </div>
@@ -749,67 +945,904 @@ export function ChatWindow() {
           </Tooltip>
         </div>
       </div>
+    </>
+  );
 
-      {/* Messages / skeleton / empty state */}
-      {showSkeleton ? (
-        <ChatMessageSkeleton />
-      ) : hasMessages ? (
-        <ChatMessageList
-          key={activeSessionId}
+  if (pageMode) {
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-background">
+        <div className="shrink-0 border-b bg-background">
+          <div className="flex min-h-14 items-center justify-between gap-3 px-5 py-2.5">
+            <div className="flex min-w-0 items-center gap-2.5">
+              {displayAgent ? (
+                <ActorAvatar
+                  actorType="agent"
+                  actorId={displayAgent.id}
+                  size={28}
+                  enableHoverCard
+                  showStatusDot={!displayAgent.archived_at}
+                />
+              ) : (
+                <span className="size-7 rounded-md bg-muted" />
+              )}
+              <div className="min-w-0">
+                <h1 className="truncate text-sm font-semibold leading-5">
+                  {displayAgent?.name ?? t(($) => $.window.no_agents)}
+                </h1>
+              </div>
+            </div>
+            {displayAgent && (
+              <AppLink
+                href={workspacePaths.agentDetail(displayAgent.id)}
+                className="shrink-0 rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                {t(($) => $.page.show_profile)}
+              </AppLink>
+            )}
+          </div>
+          <div className="flex h-9 items-end gap-5 px-5">
+            <div className="border-b-2 border-foreground pb-2 text-sm font-medium">
+              {t(($) => $.page.chat_tab)}
+            </div>
+          </div>
+        </div>
+        <ThreadedChatPageBody
           messages={messages}
           pendingTask={pendingTask}
           availability={availability}
-          firstItemIndex={firstItemIndex}
+          agent={displayAgent}
+          user={user}
+          showSkeleton={showSkeleton}
           hasOlderMessages={!!hasOlderMessages}
           isFetchingOlderMessages={isFetchingOlderMessages}
           onLoadOlderMessages={() => void fetchOlderMessages()}
+          emptyState={(
+            <EmptyState
+              hasSessions={sessions.length > 0}
+              agentName={displayAgent?.name ?? activeAgent?.name}
+              onPickPrompt={(text) => handleSend(text)}
+            />
+          )}
+          statusBanner={statusBanner}
+          composer={composer}
+          onSendThreadReply={handleThreadReplySend}
+          restoreDraftRequest={restoreDraftRequest}
+          onRestoreDraftConsumed={handleRestoreDraftConsumed}
+          onUploadFile={handleUploadFile}
+          onStop={handleStop}
+          isRunning={!!pendingTaskId}
+          disabled={isSessionArchived}
+          noAgent={noAgent}
+          agentName={displayAgent?.name ?? activeAgent?.name}
+          contextItems={contextItems}
         />
-      ) : (
-        <EmptyState
-          hasSessions={sessions.length > 0}
-          agentName={activeAgent?.name}
-          onPickPrompt={(text) => handleSend(text)}
-        />
-      )}
+      </div>
+    );
+  }
 
-      {/* Status banner above the input — single mutually-exclusive slot.
-       *  Priority: no-agent > offline / unstable. Agent presence is the
-       *  hard prerequisite (you can't send anything without one), so it
-       *  always wins over a presence hint. Recent issue/project navigation
-       *  lives in the input action row; it is not message/session state.
-       *
-       *  We key off `noAgent` (the resolved-empty state) rather than
-       *  `!activeAgent`, so the loading window between mount and the
-       *  first agent-list response stays banner-free. */}
-      {noAgent ? (
-        <NoAgentBanner />
-      ) : (
-        <OfflineBanner agentName={activeAgent?.name} availability={availability} />
-      )}
+  if (isAgentChatPath(pathname)) return null;
 
-      {/* Input — disabled for legacy archived sessions; locked out entirely
-       *  when there's no agent (the EmptyState above carries the CTA). */}
-      <ChatInput
-        onSend={handleSend}
-        restoreDraftRequest={restoreDraftRequest}
-        onRestoreDraftConsumed={handleRestoreDraftConsumed}
-        onUploadFile={handleUploadFile}
-        onStop={handleStop}
-        isRunning={!!pendingTaskId}
-        disabled={isSessionArchived}
-        noAgent={noAgent}
-        agentName={activeAgent?.name}
-        leftAdornment={
-          <AgentDropdown
-            agents={availableAgents}
-            activeAgent={activeAgent}
-            userId={user?.id}
-            onSelect={handleSelectAgent}
-          />
-        }
-        contextItems={contextItems}
-      />
+  return (
+    <motion.div
+      ref={windowRef}
+      className={containerClass}
+      style={containerStyle}
+      initial={{ opacity: 0, scale: 0.95, width: renderWidth, height: renderHeight }}
+      animate={{
+        opacity: isVisible ? 1 : 0,
+        scale: isVisible ? 1 : 0.95,
+        width: renderWidth,
+        height: renderHeight,
+      }}
+      transition={{
+        width: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
+        height: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
+        opacity: { duration: 0.15 },
+        scale: { type: "spring", duration: 0.2, bounce: 0 },
+      }}
+    >
+      {floatingHeader}
+      {chatBody}
     </motion.div>
+  );
+}
+
+interface ChatThread {
+  id: string;
+  chatThreadId: string | null;
+  threadTaskId: string | null;
+  root: ChatMessage;
+  replies: ChatMessage[];
+}
+
+type ThreadReplySendHandler = (
+  chatThreadId: string | null,
+  threadTaskId: string | null,
+  clientThreadKey: string,
+  draftKeyScope: string,
+  content: string,
+  attachmentIds?: string[],
+  commitInput?: (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
+  draftAttachments?: Attachment[],
+) => Promise<boolean>;
+
+type ThreadTimelineEntry =
+  | { kind: "standalone-assistant"; message: ChatMessage }
+  | { kind: "thread"; thread: ChatThread };
+
+function messageThreadTaskId(message: ChatMessage): string | null {
+  return message.thread_task_id ?? message.task_id ?? null;
+}
+
+function messageThreadKey(message: ChatMessage): string | null {
+  return message.client_thread_id ?? message.chat_thread_id ?? messageThreadTaskId(message);
+}
+
+function isThreadReplyMessage(message: ChatMessage): boolean {
+  const threadTaskId = message.thread_task_id;
+  return !!threadTaskId && !!message.task_id && threadTaskId !== message.task_id;
+}
+
+function buildThreadTimeline(messages: ChatMessage[]): ThreadTimelineEntry[] {
+  const timeline: ThreadTimelineEntry[] = [];
+  const threadsByThreadKey = new Map<string, ChatThread>();
+  const pendingRepliesByThreadKey = new Map<string, ChatMessage[]>();
+
+  const addPendingReply = (threadKey: string, message: ChatMessage) => {
+    const pending = pendingRepliesByThreadKey.get(threadKey);
+    if (pending) {
+      pending.push(message);
+    } else {
+      pendingRepliesByThreadKey.set(threadKey, [message]);
+    }
+  };
+
+  const attachPendingReplies = (threadKey: string, thread: ChatThread) => {
+    const pending = pendingRepliesByThreadKey.get(threadKey);
+    if (!pending) return;
+    thread.replies.push(...pending);
+    pendingRepliesByThreadKey.delete(threadKey);
+  };
+
+  for (const message of messages) {
+    const threadKey = messageThreadKey(message);
+    const threadTaskId = messageThreadTaskId(message);
+    if (message.role === "user") {
+      const existingThread = threadKey ? threadsByThreadKey.get(threadKey) : null;
+      if (existingThread) {
+        existingThread.replies.push(message);
+        continue;
+      }
+      if (threadKey && isThreadReplyMessage(message)) {
+        addPendingReply(threadKey, message);
+        continue;
+      }
+
+      const thread: ChatThread = {
+        id: threadKey ?? message.id,
+        chatThreadId: message.chat_thread_id ?? null,
+        threadTaskId,
+        root: message,
+        replies: [],
+      };
+      timeline.push({ kind: "thread", thread });
+      if (threadKey) {
+        threadsByThreadKey.set(threadKey, thread);
+        attachPendingReplies(threadKey, thread);
+      }
+      continue;
+    }
+
+    const thread = threadKey ? threadsByThreadKey.get(threadKey) : null;
+    if (thread) {
+      thread.replies.push(message);
+    } else if (threadKey && isThreadReplyMessage(message)) {
+      addPendingReply(threadKey, message);
+    } else {
+      timeline.push({ kind: "standalone-assistant", message });
+    }
+  }
+
+  return timeline;
+}
+
+function threadContainsTask(thread: ChatThread, taskId: string): boolean {
+  return thread.root.task_id === taskId || thread.replies.some((message) => message.task_id === taskId);
+}
+
+function formatMessageTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function sameCalendarDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+}
+
+function formatThreadTimestamp(value: string, todayAt: (time: string) => string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const time = formatMessageTime(value);
+  if (sameCalendarDay(date, new Date())) return todayAt(time);
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function ThreadedChatPageBody({
+  messages,
+  pendingTask,
+  availability,
+  agent,
+  user,
+  showSkeleton,
+  hasOlderMessages,
+  isFetchingOlderMessages,
+  onLoadOlderMessages,
+  emptyState,
+  statusBanner,
+  composer,
+  onSendThreadReply,
+  restoreDraftRequest,
+  onRestoreDraftConsumed,
+  onUploadFile,
+  onStop,
+  isRunning,
+  disabled,
+  noAgent,
+  agentName,
+  contextItems,
+}: {
+  messages: ChatMessage[];
+  pendingTask: ChatPendingTask | null | undefined;
+  availability: AgentAvailability | undefined;
+  agent: Agent | null;
+  user: User | null;
+  showSkeleton: boolean;
+  hasOlderMessages: boolean;
+  isFetchingOlderMessages: boolean;
+  onLoadOlderMessages: () => void;
+  emptyState: React.ReactNode;
+  statusBanner: React.ReactNode;
+  composer: React.ReactNode;
+  onSendThreadReply: ThreadReplySendHandler;
+  restoreDraftRequest?: {
+    id: string;
+    content: string;
+    attachments?: Attachment[];
+    sessionId?: string;
+    draftKeyScope?: string;
+  } | null;
+  onRestoreDraftConsumed?: () => void;
+  onUploadFile?: (file: File) => Promise<UploadResult | null>;
+  onStop?: (options?: { draftKeyScope?: string }) => void;
+  isRunning: boolean;
+  disabled: boolean;
+  noAgent: boolean;
+  agentName?: string;
+  contextItems?: MentionItem[];
+}) {
+  const { t } = useT("chat");
+  const timeline = useMemo(() => buildThreadTimeline(messages), [messages]);
+  const threads = useMemo(
+    () => timeline.filter((entry): entry is { kind: "thread"; thread: ChatThread } => entry.kind === "thread"),
+    [timeline],
+  );
+  const pendingTaskId = pendingTask?.task_id ?? null;
+  const canFetchPendingTaskMessages = isTaskMessageTaskId(pendingTaskId);
+  const { data: pendingTaskMessages } = useQuery({
+    ...taskMessagesOptions(pendingTaskId ?? ""),
+    enabled: canFetchPendingTaskMessages,
+  });
+  const pendingAlreadyPersisted = !!pendingTaskId && messages.some(
+    (m) => m.role === "assistant" && m.task_id === pendingTaskId,
+  );
+  const activePendingThreadId = pendingTaskId
+    ? threads.find(({ thread }) => threadContainsTask(thread, pendingTaskId))?.thread.id ?? null
+    : null;
+  const pendingPlaceholderThreadId = activePendingThreadId && !pendingAlreadyPersisted
+    ? activePendingThreadId
+    : null;
+  const latestThreadId = threads[threads.length - 1]?.thread.id ?? null;
+  const previousLatestThreadIdRef = useRef<string | null>(null);
+  const previousActivePendingThreadIdRef = useRef<string | null>(null);
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const [panelClosed, setPanelClosed] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [threadPanelWidth, setThreadPanelWidth] = useState(THREAD_PANEL_DEFAULT_WIDTH);
+  const [isResizingThreadPanel, setIsResizingThreadPanel] = useState(false);
+
+  useEffect(() => {
+    const selectedStillExists = selectedThreadId
+      ? threads.some(({ thread }) => thread.id === selectedThreadId)
+      : false;
+    const latestChanged =
+      !!latestThreadId &&
+      !!previousLatestThreadIdRef.current &&
+      previousLatestThreadIdRef.current !== latestThreadId;
+    previousLatestThreadIdRef.current = latestThreadId;
+    const activePendingThreadChanged =
+      !!activePendingThreadId &&
+      previousActivePendingThreadIdRef.current !== activePendingThreadId;
+    previousActivePendingThreadIdRef.current = activePendingThreadId;
+
+    if (activePendingThreadChanged && selectedThreadId !== activePendingThreadId) {
+      setSelectedThreadId(activePendingThreadId);
+      setPanelClosed(false);
+      return;
+    }
+
+    if (latestChanged && selectedThreadId !== latestThreadId) {
+      setSelectedThreadId(latestThreadId);
+      setPanelClosed(false);
+      return;
+    }
+
+    if (!selectedStillExists && latestThreadId && !panelClosed) {
+      setSelectedThreadId(latestThreadId);
+      return;
+    }
+
+    if (selectedThreadId && !selectedStillExists) {
+      setSelectedThreadId(panelClosed ? null : latestThreadId);
+    }
+  }, [activePendingThreadId, latestThreadId, panelClosed, selectedThreadId, threads]);
+
+  const handleThreadResizePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = threadPanelWidth;
+      const containerWidth = containerRef.current?.getBoundingClientRect().width ?? window.innerWidth;
+      const maxWidth = Math.max(
+        THREAD_PANEL_MIN_WIDTH,
+        Math.min(THREAD_PANEL_MAX_WIDTH, containerWidth - THREAD_MAIN_MIN_WIDTH),
+      );
+      const previousCursor = document.body.style.cursor;
+      const previousUserSelect = document.body.style.userSelect;
+
+      setIsResizingThreadPanel(true);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        const nextWidth = startWidth + startX - moveEvent.clientX;
+        setThreadPanelWidth(Math.max(THREAD_PANEL_MIN_WIDTH, Math.min(maxWidth, nextWidth)));
+      };
+      const handlePointerUp = () => {
+        setIsResizingThreadPanel(false);
+        document.body.style.cursor = previousCursor;
+        document.body.style.userSelect = previousUserSelect;
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", handlePointerUp);
+      };
+
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", handlePointerUp);
+    },
+    [threadPanelWidth],
+  );
+
+  const selectedThread = selectedThreadId
+    ? threads.find(({ thread }) => thread.id === selectedThreadId)?.thread ?? null
+    : null;
+
+  const selectThread = useCallback((threadId: string) => {
+    setSelectedThreadId(threadId);
+    setPanelClosed(false);
+  }, []);
+
+  const closeThread = useCallback(() => {
+    setSelectedThreadId(null);
+    setPanelClosed(true);
+  }, []);
+
+  return (
+    <div ref={containerRef} className="flex min-h-0 flex-1 overflow-hidden">
+      <div className={cn(
+        "flex min-w-0 flex-1 flex-col",
+        selectedThread && "hidden lg:flex",
+      )}
+      >
+        <div data-tab-scroll-root className="min-h-0 flex-1 overflow-y-auto">
+          {showSkeleton ? (
+            <ChatMessageSkeleton />
+          ) : timeline.length > 0 ? (
+            <div className="mx-auto w-full max-w-4xl space-y-5 px-6 py-4">
+              {hasOlderMessages && (
+                <div className="flex justify-center">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={isFetchingOlderMessages}
+                    onClick={onLoadOlderMessages}
+                  >
+                    {isFetchingOlderMessages
+                      ? t(($) => $.message_list.loading_older)
+                      : t(($) => $.thread.load_older)}
+                  </Button>
+                </div>
+              )}
+              {timeline.map((entry) => entry.kind === "standalone-assistant" ? (
+                <ThreadStandaloneAssistant
+                  key={entry.message.id}
+                  message={entry.message}
+                  agent={agent}
+                />
+              ) : (
+                <ThreadRootItem
+                  key={entry.thread.id}
+                  thread={entry.thread}
+                  agent={agent}
+                  user={user}
+                  selected={selectedThreadId === entry.thread.id}
+                  pending={pendingPlaceholderThreadId === entry.thread.id}
+                  pendingTask={pendingPlaceholderThreadId === entry.thread.id ? pendingTask : null}
+                  pendingTaskMessages={pendingTaskMessages ?? []}
+                  availability={availability}
+                  onSelect={() => selectThread(entry.thread.id)}
+                />
+              ))}
+            </div>
+          ) : (
+            emptyState
+          )}
+        </div>
+        {statusBanner}
+        {composer}
+      </div>
+      <AnimatePresence initial={false}>
+        {selectedThread && (
+          <motion.div
+            key="thread-panel-shell"
+            className="flex min-w-0 flex-1 lg:flex-none lg:w-[var(--thread-panel-width)]"
+            style={{ "--thread-panel-width": `${threadPanelWidth}px` } as React.CSSProperties}
+            initial={{ opacity: 0, x: 28 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 28 }}
+            transition={{ type: "spring", duration: 0.28, bounce: 0 }}
+          >
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t(($) => $.thread.resize)}
+              className="group hidden w-3 shrink-0 cursor-col-resize touch-none select-none items-stretch justify-center lg:flex"
+              onPointerDown={handleThreadResizePointerDown}
+            >
+              <span
+                className={cn(
+                  "w-px bg-border transition-colors group-hover:bg-foreground/30",
+                  isResizingThreadPanel && "bg-brand",
+                )}
+              />
+            </div>
+            <ThreadPanel
+              thread={selectedThread}
+              agent={agent}
+              user={user}
+              pendingTask={activePendingThreadId === selectedThread.id ? pendingTask : null}
+              pendingTaskMessages={pendingTaskMessages ?? []}
+              availability={availability}
+              onClose={closeThread}
+              onSendThreadReply={onSendThreadReply}
+              restoreDraftRequest={restoreDraftRequest}
+              onRestoreDraftConsumed={onRestoreDraftConsumed}
+              onUploadFile={onUploadFile}
+              onStop={onStop}
+              isRunning={isRunning}
+              disabled={disabled}
+              noAgent={noAgent}
+              agentName={agentName}
+              contextItems={contextItems}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function ThreadStandaloneAssistant({
+  message,
+  agent,
+}: {
+  message: ChatMessage;
+  agent: Agent | null;
+}) {
+  return (
+    <div className="flex items-start gap-2.5">
+      {agent ? (
+        <ActorAvatar actorType="agent" actorId={agent.id} size={34} showStatusDot={!agent.archived_at} profileLink={false} />
+      ) : (
+        <span className="size-8 rounded-full bg-muted" />
+      )}
+      <div className="min-w-0 flex-1">
+        <MessageAuthorLine
+          name={agent?.name ?? "Agent"}
+          time={message.created_at}
+        />
+        <AssistantMessage message={message} isPending={false} />
+      </div>
+    </div>
+  );
+}
+
+function ThreadRootItem({
+  thread,
+  agent,
+  user,
+  selected,
+  pending,
+  pendingTask,
+  pendingTaskMessages,
+  availability,
+  onSelect,
+}: {
+  thread: ChatThread;
+  agent: Agent | null;
+  user: User | null;
+  selected: boolean;
+  pending: boolean;
+  pendingTask: ChatPendingTask | null | undefined;
+  pendingTaskMessages: readonly TaskMessagePayload[];
+  availability: AgentAvailability | undefined;
+  onSelect: () => void;
+}) {
+  const { t } = useT("chat");
+  const replyCount = thread.replies.length + (pending ? 1 : 0);
+  const latestReply = thread.replies[thread.replies.length - 1] ?? null;
+  const summaryTime = latestReply?.created_at ?? thread.root.created_at;
+  const hasReplySummary = replyCount > 0;
+  const replyText = pending
+    ? t(($) => $.thread.replying)
+    : t(($) => $.thread.reply, { count: replyCount });
+
+  return (
+    <div className={cn("rounded-lg py-0.5 transition-colors", selected && "bg-accent/30")}>
+      <div className="flex items-start gap-2.5 px-1">
+        <ActorAvatar
+          actorType="member"
+          actorId={user?.id ?? ""}
+          size={36}
+          profileLink={false}
+        />
+        <div className="min-w-0 flex-1">
+          <MessageAuthorLine
+            name={user?.name || user?.email || "You"}
+            time={thread.root.created_at}
+          />
+          <UserMessageContent message={thread.root} />
+          {hasReplySummary && (
+            <button
+              type="button"
+              onClick={onSelect}
+              className="mt-2 flex items-center gap-2 rounded-md py-0.5 pr-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+            >
+              <span className="ml-2 h-6 w-7 rounded-bl-xl border-b border-l border-border" />
+              {pending && pendingTask ? (
+                <ThreadPendingInlineStatus
+                  agent={agent}
+                  pendingTask={pendingTask}
+                  taskMessages={pendingTaskMessages}
+                  availability={availability}
+                />
+              ) : (
+                <>
+                  {agent ? (
+                    <ActorAvatar actorType="agent" actorId={agent.id} size={18} profileLink={false} />
+                  ) : (
+                    <span className="size-4 rounded-full bg-muted" />
+                  )}
+                  <span className="font-medium">{replyText}</span>
+                  <span>{formatThreadTimestamp(summaryTime, (time) => t(($) => $.thread.today_at, { time }))}</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ThreadPanel({
+  thread,
+  agent,
+  user,
+  pendingTask,
+  pendingTaskMessages,
+  availability,
+  onClose,
+  onSendThreadReply,
+  restoreDraftRequest,
+  onRestoreDraftConsumed,
+  onUploadFile,
+  onStop,
+  isRunning,
+  disabled,
+  noAgent,
+  agentName,
+  contextItems,
+}: {
+  thread: ChatThread;
+  agent: Agent | null;
+  user: User | null;
+  pendingTask: ChatPendingTask | null | undefined;
+  pendingTaskMessages: readonly TaskMessagePayload[];
+  availability: AgentAvailability | undefined;
+  onClose: () => void;
+  onSendThreadReply: ThreadReplySendHandler;
+  restoreDraftRequest?: {
+    id: string;
+    content: string;
+    attachments?: Attachment[];
+    sessionId?: string;
+    draftKeyScope?: string;
+  } | null;
+  onRestoreDraftConsumed?: () => void;
+  onUploadFile?: (file: File) => Promise<UploadResult | null>;
+  onStop?: (options?: { draftKeyScope?: string }) => void;
+  isRunning: boolean;
+  disabled: boolean;
+  noAgent: boolean;
+  agentName?: string;
+  contextItems?: MentionItem[];
+}) {
+  const { t } = useT("chat");
+  const threadTaskId = thread.threadTaskId ?? messageThreadTaskId(thread.root);
+  const chatThreadId = thread.chatThreadId ?? thread.root.chat_thread_id ?? null;
+  const draftKeyScope = `thread-${thread.id}`;
+  const pendingTaskId = pendingTask?.task_id ?? null;
+  const pendingReplyAlreadyPersisted = !!pendingTaskId && thread.replies.some(
+    (reply) => reply.role === "assistant" && reply.task_id === pendingTaskId,
+  );
+  const replyCount = thread.replies.length + (pendingTaskId && !pendingReplyAlreadyPersisted ? 1 : 0);
+  const titleName = user?.name || user?.email || "You";
+
+  return (
+    <aside className="flex min-w-0 flex-1 flex-col bg-background">
+      <div className="flex min-h-14 shrink-0 items-start justify-between gap-3 border-b px-5 py-2.5">
+        <div className="min-w-0">
+          <h2 className="truncate text-base font-semibold">
+            {t(($) => $.thread.title, { name: titleName })}
+          </h2>
+          <div className="mt-1 text-sm text-muted-foreground">
+            {t(($) => $.thread.reply, { count: replyCount })}
+          </div>
+        </div>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="shrink-0 rounded-full text-muted-foreground"
+                onClick={onClose}
+                aria-label={t(($) => $.thread.close)}
+              />
+            }
+          >
+            <X />
+          </TooltipTrigger>
+          <TooltipContent side="left">{t(($) => $.thread.close)}</TooltipContent>
+        </Tooltip>
+      </div>
+      <div data-tab-scroll-root className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="space-y-4">
+          <div className="flex items-start gap-2.5">
+            <ActorAvatar
+              actorType="member"
+              actorId={user?.id ?? ""}
+              size={34}
+              profileLink={false}
+            />
+            <div className="min-w-0 flex-1">
+              <MessageAuthorLine
+                name={user?.name || user?.email || "You"}
+                time={thread.root.created_at}
+              />
+              <UserMessageContent message={thread.root} />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 text-sm text-muted-foreground">
+            <span className="whitespace-nowrap">
+              {t(($) => $.thread.reply, { count: replyCount })}
+            </span>
+            <span className="h-px flex-1 bg-border" />
+          </div>
+
+          {thread.replies.map((reply) => (
+            <ThreadReplyMessage
+              key={reply.id}
+              message={reply}
+              agent={agent}
+              user={user}
+              pendingTaskId={pendingTaskId}
+            />
+          ))}
+
+          {pendingTask?.task_id && !pendingReplyAlreadyPersisted && (
+            <ThreadPendingReply
+              agent={agent}
+              pendingTask={pendingTask}
+              taskMessages={pendingTaskMessages}
+              availability={availability}
+            />
+          )}
+        </div>
+      </div>
+      {(chatThreadId || threadTaskId) && (
+        <ChatInput
+          onSend={(content, attachmentIds, commitInput, draftAttachments) =>
+            onSendThreadReply(
+              chatThreadId,
+              threadTaskId,
+              thread.id,
+              draftKeyScope,
+              content,
+              attachmentIds,
+              commitInput,
+              draftAttachments,
+            )}
+          restoreDraftRequest={restoreDraftRequest}
+          onRestoreDraftConsumed={onRestoreDraftConsumed}
+          onUploadFile={onUploadFile}
+          onStop={onStop ? () => onStop({ draftKeyScope }) : undefined}
+          isRunning={isRunning}
+          disabled={disabled}
+          noAgent={noAgent}
+          agentName={agentName}
+          draftKeyScope={draftKeyScope}
+          placeholder={t(($) => $.thread.input_placeholder)}
+          contextItems={contextItems}
+        />
+      )}
+    </aside>
+  );
+}
+
+function ThreadReplyMessage({
+  message,
+  agent,
+  user,
+  pendingTaskId,
+}: {
+  message: ChatMessage;
+  agent: Agent | null;
+  user: User | null;
+  pendingTaskId: string | null;
+}) {
+  if (message.role === "user") {
+    return (
+      <div className="flex items-start gap-2.5">
+        <ActorAvatar
+          actorType="member"
+          actorId={user?.id ?? ""}
+          size={34}
+          profileLink={false}
+        />
+        <div className="min-w-0 flex-1">
+          <MessageAuthorLine
+            name={user?.name || user?.email || "You"}
+            time={message.created_at}
+          />
+          <UserMessageContent message={message} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-start gap-2.5">
+      {agent ? (
+        <ActorAvatar actorType="agent" actorId={agent.id} size={34} showStatusDot={!agent.archived_at} profileLink={false} />
+      ) : (
+        <span className="size-8 rounded-full bg-muted" />
+      )}
+      <div className="min-w-0 flex-1">
+        <MessageAuthorLine
+          name={agent?.name ?? "Agent"}
+          time={message.created_at}
+        />
+        <AssistantMessage message={message} isPending={message.task_id === pendingTaskId} />
+      </div>
+    </div>
+  );
+}
+
+function ThreadPendingReply({
+  agent,
+  pendingTask,
+  taskMessages,
+  availability,
+}: {
+  agent: Agent | null;
+  pendingTask: ChatPendingTask;
+  taskMessages: readonly TaskMessagePayload[];
+  availability: AgentAvailability | undefined;
+}) {
+  return (
+    <div className="flex items-start gap-2.5">
+      {agent ? (
+        <ActorAvatar actorType="agent" actorId={agent.id} size={34} showStatusDot={!agent.archived_at} profileLink={false} />
+      ) : (
+        <span className="size-8 rounded-full bg-muted" />
+      )}
+      <div className="min-w-0 flex-1 pt-0.5">
+        <TaskStatusPill
+          pendingTask={pendingTask}
+          taskMessages={taskMessages}
+          availability={availability}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ThreadPendingInlineStatus({
+  agent,
+  pendingTask,
+  taskMessages,
+  availability,
+}: {
+  agent: Agent | null;
+  pendingTask: ChatPendingTask;
+  taskMessages: readonly TaskMessagePayload[];
+  availability: AgentAvailability | undefined;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-1.5 rounded-full bg-muted px-1.5 py-1">
+      {agent ? (
+        <ActorAvatar actorType="agent" actorId={agent.id} size={22} profileLink={false} />
+      ) : (
+        <span className="size-5 rounded-full bg-background" />
+      )}
+      <TaskStatusPill
+        pendingTask={pendingTask}
+        taskMessages={taskMessages}
+        availability={availability}
+      />
+    </div>
+  );
+}
+
+function MessageAuthorLine({
+  name,
+  time,
+}: {
+  name: string;
+  time: string;
+}) {
+  return (
+    <div className="mb-0.5 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      <span className="truncate text-sm font-semibold">{name}</span>
+      <span className="text-sm text-muted-foreground">{formatMessageTime(time)}</span>
+    </div>
+  );
+}
+
+function UserMessageContent({ message }: { message: ChatMessage }) {
+  return (
+    <div className="min-w-0 overflow-x-auto text-sm leading-normal prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+      <Markdown attachments={message.attachments}>{message.content}</Markdown>
+      <AttachmentList
+        attachments={message.attachments}
+        content={message.content}
+        className="mt-1.5"
+      />
+    </div>
   );
 }
 
