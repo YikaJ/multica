@@ -402,7 +402,7 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 type SendChatMessageRequest struct {
 	Content       string   `json:"content"`
 	AttachmentIDs []string `json:"attachment_ids"`
-	ChatThreadID string   `json:"chat_thread_id"`
+	ChatThreadID  string   `json:"chat_thread_id"`
 	ReplyToTaskID string   `json:"reply_to_task_id"`
 }
 
@@ -494,15 +494,13 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 			ChatSessionID: session.ID,
 			ChatThreadID:  requestedChatThreadID,
 		})
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusBadRequest, "reply thread not found")
-			return
-		}
-		if err != nil {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusInternalServerError, "failed to resolve reply thread")
 			return
 		}
-		threadTaskID = resolvedThreadTaskID
+		if err == nil {
+			threadTaskID = resolvedThreadTaskID
+		}
 		chatThreadID = requestedChatThreadID
 	} else if req.ReplyToTaskID != "" {
 		requestedThreadTaskID, ok := parseUUIDOrBadRequest(w, req.ReplyToTaskID, "reply_to_task_id")

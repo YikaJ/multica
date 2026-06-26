@@ -987,6 +987,7 @@ function ChatSurface({ mode, routeAgentId }: ChatSurfaceProps) {
           </div>
         </div>
         <ThreadedChatPageBody
+          key={effectiveActiveSessionId ?? routeAgentId ?? "agent-chat"}
           messages={messages}
           pendingTask={pendingTask}
           availability={availability}
@@ -1439,7 +1440,8 @@ function ThreadedChatPageBody({
               onRestoreDraftConsumed={onRestoreDraftConsumed}
               onUploadFile={onUploadFile}
               onStop={onStop}
-              isRunning={isRunning}
+              isRunning={activePendingThreadId === selectedThread.id && isRunning}
+              sendBlocked={!!pendingTaskId && activePendingThreadId !== selectedThread.id}
               disabled={disabled}
               noAgent={noAgent}
               agentName={agentName}
@@ -1569,6 +1571,7 @@ function ThreadPanel({
   onUploadFile,
   onStop,
   isRunning,
+  sendBlocked,
   disabled,
   noAgent,
   agentName,
@@ -1593,6 +1596,7 @@ function ThreadPanel({
   onUploadFile?: (file: File) => Promise<UploadResult | null>;
   onStop?: (options?: { draftKeyScope?: string }) => void;
   isRunning: boolean;
+  sendBlocked?: boolean;
   disabled: boolean;
   noAgent: boolean;
   agentName?: string;
@@ -1701,6 +1705,7 @@ function ThreadPanel({
           onUploadFile={onUploadFile}
           onStop={onStop ? () => onStop({ draftKeyScope }) : undefined}
           isRunning={isRunning}
+          sendBlocked={sendBlocked}
           disabled={disabled}
           noAgent={noAgent}
           agentName={agentName}

@@ -32,10 +32,6 @@ SET scope_type = 'channel',
 FROM channel_chat_session_binding ccb
 WHERE ccb.chat_session_id = cs.id;
 
-CREATE INDEX idx_chat_session_scope
-  ON chat_session(workspace_id, agent_id, scope_type, scope_id, source)
-  WHERE status = 'active' AND superseded_by_chat_session_id IS NULL;
-
 CREATE TABLE chat_thread (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     chat_session_id UUID NOT NULL REFERENCES chat_session(id) ON DELETE CASCADE,
@@ -82,6 +78,10 @@ SET superseded_by_chat_session_id = cp.canonical_id,
 FROM canonical_private cp
 WHERE cs.id = cp.id
   AND cs.id <> cp.canonical_id;
+
+CREATE UNIQUE INDEX idx_chat_session_scope
+  ON chat_session(workspace_id, agent_id, scope_type, scope_id, source)
+  WHERE status = 'active' AND superseded_by_chat_session_id IS NULL;
 
 -- Create one thread for every legacy thread-task group inside every old
 -- session. The thread lives under the canonical conversation when a private DM

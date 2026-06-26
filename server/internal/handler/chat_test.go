@@ -198,6 +198,87 @@ func TestSendChatMessage_LinksUnattachedAttachments(t *testing.T) {
 	}
 }
 
+func TestSendChatMessage_RepliesToThreadWithoutExistingTask(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatLegacyThreadNoTaskAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	ctx := context.Background()
+
+	var threadID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_thread (chat_session_id, title, created_by)
+		VALUES ($1, 'legacy unthreaded root', $2)
+		RETURNING id
+	`, sessionID, testUserID).Scan(&threadID); err != nil {
+		t.Fatalf("create legacy chat thread: %v", err)
+	}
+
+	var rootMessageID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_message (chat_session_id, chat_thread_id, role, content)
+		VALUES ($1, $2, 'user', 'legacy root without task')
+		RETURNING id
+	`, sessionID, threadID).Scan(&rootMessageID); err != nil {
+		t.Fatalf("create legacy root message: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE chat_thread SET root_message_id = $1 WHERE id = $2
+	`, rootMessageID, threadID); err != nil {
+		t.Fatalf("link legacy root message: %v", err)
+	}
+
+	sendReq := newRequest("POST", "/api/chat-sessions/"+sessionID+"/messages", map[string]any{
+		"content":        "reply inside the legacy thread",
+		"chat_thread_id": threadID,
+	})
+	sendReq = withURLParam(sendReq, "sessionId", sessionID)
+	sendReq = withChatTestWorkspaceCtx(t, sendReq)
+	sendW := httptest.NewRecorder()
+	testHandler.SendChatMessage(sendW, sendReq)
+	if sendW.Code != http.StatusCreated {
+		t.Fatalf("SendChatMessage legacy thread reply: expected 201, got %d: %s", sendW.Code, sendW.Body.String())
+	}
+
+	var sendResp SendChatMessageResponse
+	if err := json.Unmarshal(sendW.Body.Bytes(), &sendResp); err != nil {
+		t.Fatalf("decode send: %v", err)
+	}
+	if sendResp.ThreadID != threadID {
+		t.Fatalf("thread id: want existing %s, got %s", threadID, sendResp.ThreadID)
+	}
+	if sendResp.ThreadTaskID != sendResp.TaskID {
+		t.Fatalf("thread task id: want new task %s, got %s", sendResp.TaskID, sendResp.ThreadTaskID)
+	}
+
+	var threadCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM chat_thread WHERE chat_session_id = $1
+	`, sessionID).Scan(&threadCount); err != nil {
+		t.Fatalf("count chat threads: %v", err)
+	}
+	if threadCount != 1 {
+		t.Fatalf("expected reply to reuse existing thread, found %d threads", threadCount)
+	}
+
+	var messageThreadID, messageThreadTaskID, taskThreadID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT
+			COALESCE(cm.chat_thread_id::text, ''),
+			COALESCE(cm.thread_task_id::text, ''),
+			COALESCE(atq.chat_thread_id::text, '')
+		FROM chat_message cm
+		JOIN agent_task_queue atq ON atq.id = cm.task_id
+		WHERE cm.id = $1
+	`, sendResp.MessageID).Scan(&messageThreadID, &messageThreadTaskID, &taskThreadID); err != nil {
+		t.Fatalf("query reply thread linkage: %v", err)
+	}
+	if messageThreadID != threadID || taskThreadID != threadID {
+		t.Fatalf("reply linkage thread mismatch: message=%s task=%s want %s", messageThreadID, taskThreadID, threadID)
+	}
+	if messageThreadTaskID != sendResp.TaskID {
+		t.Fatalf("reply thread_task_id: want %s, got %s", sendResp.TaskID, messageThreadTaskID)
+	}
+}
+
 // TestUpdateChatSession_RenamesTitle confirms PATCH writes the new title,
 // returns the updated row, and the server-side row reflects it.
 func TestUpdateChatSession_RenamesTitle(t *testing.T) {

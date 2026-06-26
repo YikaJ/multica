@@ -1644,7 +1644,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				parts := make([]string, 0, len(unanswered))
 				for _, m := range unanswered {
 					if strings.TrimSpace(m.Content) != "" {
-						parts = append(parts, formatChatPromptMessage(m))
+						if task.ChatThreadID.Valid {
+							parts = append(parts, formatChatPromptMessage(m))
+						} else {
+							parts = append(parts, m.Content)
+						}
 					}
 					if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
 						ChatMessageID: m.ID,

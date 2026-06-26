@@ -71,6 +71,8 @@ interface ChatInputProps {
   onUploadFile?: (file: File) => Promise<UploadResult | null>;
   onStop?: () => void;
   isRunning?: boolean;
+  /** Blocks sending without switching the button into stop mode. */
+  sendBlocked?: boolean;
   disabled?: boolean;
   /** True when the user has no agent available — disables the editor and
    *  surfaces a distinct placeholder. Kept separate from `disabled` so
@@ -94,6 +96,7 @@ export function ChatInput({
   onUploadFile,
   onStop,
   isRunning,
+  sendBlocked,
   disabled,
   noAgent,
   agentName,
@@ -235,10 +238,11 @@ export function ChatInput({
 
   const handleSend = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
-    if (!content || isRunning || isSubmitting || disabled || noAgent) {
+    if (!content || isRunning || sendBlocked || isSubmitting || disabled || noAgent) {
       logger.debug("input.send skipped", {
         emptyContent: !content,
         isRunning,
+        sendBlocked,
         isSubmitting,
         disabled,
         noAgent,
@@ -413,7 +417,7 @@ export function ChatInput({
           )}
           <SubmitButton
             onClick={handleSend}
-            disabled={isEmpty || isSubmitting || !!disabled || !!noAgent || pendingUploads > 0}
+            disabled={isEmpty || isSubmitting || !!sendBlocked || !!disabled || !!noAgent || pendingUploads > 0}
             loading={isSubmitting}
             running={isRunning}
             onStop={onStop}
