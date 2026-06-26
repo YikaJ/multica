@@ -361,10 +361,29 @@ func autopilotHandler(
 			return HandlerResult{}, fmt.Errorf("dispatch for plan: %w", err)
 		}
 
-		// Bump the display-only last_fired_at so the trigger UI shows
-		// the most recent fire time. Errors are not fatal — the
-		// canonical record is autopilot_run.created_at.
-		_ = queries.TouchAutopilotTriggerFiredAt(ctx, trigger.ID)
+		// Advance the display-only next_run_at to the upcoming slot and
+		// bump last_fired_at in the same write, so the trigger UI stops
+		// showing a "next run" that has already fired (MUL-3749). The
+		// value is computed on the app local clock via ComputeNextRun —
+		// the same path the trigger create/update handlers use — so every
+		// write of next_run_at uses one clock and the column stays
+		// internally consistent. Errors are not fatal: the canonical
+		// record is autopilot_run.created_at and the next dispatch
+		// refreshes the value regardless; on a cron/timezone parse failure
+		// we fall back to the last_fired_at-only bump so the fire is still
+		// recorded.
+		tz := DefaultAutopilotScheduleTimezone
+		if trigger.Timezone.Valid && trigger.Timezone.String != "" {
+			tz = trigger.Timezone.String
+		}
+		if next, cerr := service.ComputeNextRun(trigger.CronExpression.String, tz); cerr == nil {
+			_ = queries.AdvanceTriggerNextRun(ctx, db.AdvanceTriggerNextRunParams{
+				ID:        trigger.ID,
+				NextRunAt: pgtype.Timestamptz{Time: next, Valid: true},
+			})
+		} else {
+			_ = queries.TouchAutopilotTriggerFiredAt(ctx, trigger.ID)
+		}
 
 		return HandlerResult{
 			RowsAffected: 1,
