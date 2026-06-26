@@ -140,6 +140,82 @@ func (h *Handler) BeginSlackInstall(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, BeginSlackInstallResponse{URL: authorizeURL})
 }
 
+// RegisterSlackBYORequest is the body for a bring-your-own-app install: the two
+// tokens the user pasted from their own Slack app.
+type RegisterSlackBYORequest struct {
+	BotToken string `json:"bot_token"`
+	AppToken string `json:"app_token"`
+}
+
+// RegisterSlackBYO (POST /api/workspaces/{id}/slack/install/byo?agent_id=…)
+// installs a user-supplied ("bring your own") Slack app for an agent, so several
+// agents can each have their own bot identity in the SAME Slack workspace.
+// Admin-only at the router. Unlike the hosted OAuth path this needs only the
+// at-rest key configured (SlackInstall != nil), NOT the hosted OAuth client
+// credentials — BYO is exactly the path for deployments without a hosted app.
+func (h *Handler) RegisterSlackBYO(w http.ResponseWriter, r *http.Request) {
+	if h.SlackInstall == nil {
+		writeError(w, http.StatusServiceUnavailable, "slack integration not enabled")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	if !ok {
+		return
+	}
+	agentIDStr := strings.TrimSpace(r.URL.Query().Get("agent_id"))
+	if agentIDStr == "" {
+		writeError(w, http.StatusBadRequest, "agent_id is required")
+		return
+	}
+	agentUUID, ok := parseUUIDOrBadRequest(w, agentIDStr, "agent_id")
+	if !ok {
+		return
+	}
+	// Ownership pre-check at the boundary so a wrong agent_id is a clear 404.
+	if _, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          agentUUID,
+		WorkspaceID: wsUUID,
+	}); err != nil {
+		writeError(w, http.StatusNotFound, "agent not found in this workspace")
+		return
+	}
+	initiatorUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+	var body RegisterSlackBYORequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	row, err := h.SlackInstall.RegisterBYO(r.Context(), slack.RegisterBYOParams{
+		WorkspaceID: wsUUID,
+		AgentID:     agentUUID,
+		InitiatorID: initiatorUUID,
+		BotToken:    body.BotToken,
+		AppToken:    body.AppToken,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, slack.ErrInvalidBotToken), errors.Is(err, slack.ErrInvalidAppToken):
+			writeError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, slack.ErrTeamOwnedByAnotherWorkspace):
+			writeError(w, http.StatusConflict, "this Slack app is already connected to a different Multica workspace")
+		default:
+			// The dominant non-sentinel failure here is auth.test rejecting the
+			// pasted bot token (a user error), so guide the user to recheck the
+			// tokens rather than surfacing an opaque 500.
+			writeError(w, http.StatusBadRequest, "could not verify the Slack tokens — check the bot token and app-level token, and that the app is installed to your workspace")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, slackInstallationToResponse(row))
+}
+
 // SlackOAuthCallback (GET /api/slack/oauth/callback?code=…&state=…) is the
 // redirect Slack sends after the admin authorizes the app. It is NOT
 // workspace-scoped in the path — the workspace/agent/initiator are recovered

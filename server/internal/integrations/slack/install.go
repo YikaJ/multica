@@ -253,48 +253,83 @@ func (s *InstallService) Complete(ctx context.Context, code, rawState string) (C
 	if err != nil {
 		return CompletedInstall{}, fmt.Errorf("encode slack installation config: %w", err)
 	}
-	// One transaction so the lookup, upsert, stale-binding retire and installer
-	// bind are atomic — a partial apply (moved agent but stale chat-session
-	// bindings) is exactly the inconsistency this guards against.
+	inst, err := s.persistInstall(ctx, installPersist{
+		wsID:             wsID,
+		agentID:          agentID,
+		installerID:      userID,
+		appIDKey:         resp.Team.ID,
+		configJSON:       cfgJSON,
+		installerSlackID: resp.AuthedUser.ID,
+	})
+	if err != nil {
+		return CompletedInstall{}, err
+	}
+	return CompletedInstall{
+		WorkspaceID:    wsID,
+		AgentID:        agentID,
+		InstallationID: inst.ID,
+		TeamID:         resp.Team.ID,
+		TeamName:       resp.Team.Name,
+	}, nil
+}
+
+// installPersist carries the resolved fields persistInstall writes. appIDKey is
+// the value stored at config->>'app_id' — the team id for a hosted OAuth install,
+// the real Slack app id for a BYO install — and MUST equal the app_id inside
+// configJSON; it is the lookup / ON CONFLICT key. installerSlackID is the
+// installer's Slack user id to auto-bind, or "" to skip (a BYO paste carries no
+// authed_user, so the installer binds via the normal token flow on first message).
+type installPersist struct {
+	wsID             pgtype.UUID
+	agentID          pgtype.UUID
+	installerID      pgtype.UUID
+	appIDKey         string
+	configJSON       []byte
+	installerSlackID string
+}
+
+// persistInstall runs the lookup → upsert → stale-binding retire → installer
+// bind in ONE transaction, shared by the OAuth Complete and the BYO Register
+// paths so the cross-workspace guard and agent-move cleanup can never drift
+// between them. The guard is atomic in the upsert's WHERE clause: an app_id
+// already owned by a DIFFERENT Multica workspace updates no row and returns
+// pgx.ErrNoRows, which maps to ErrTeamOwnedByAnotherWorkspace.
+func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (db.ChannelInstallation, error) {
 	tx, err := s.tx.Begin(ctx)
 	if err != nil {
-		return CompletedInstall{}, fmt.Errorf("begin install tx: %w", err)
+		return db.ChannelInstallation{}, fmt.Errorf("begin install tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
 
-	// Look up any existing installation for this Slack team (team_id is stored as
-	// config->>'app_id'). This drives ONLY the agent-change cleanup below — it is
-	// NOT the cross-workspace guard (a plain SELECT can't win the concurrent-OAuth
-	// race; that guard lives atomically in the upsert's WHERE clause).
+	// Look up any existing installation under this app_id key. Drives ONLY the
+	// agent-change cleanup below — NOT the cross-workspace guard (a plain SELECT
+	// can't win the concurrent-install race; that guard is in the upsert's WHERE).
 	existing, lookupErr := qtx.GetChannelInstallationByAppID(ctx, db.GetChannelInstallationByAppIDParams{
 		ChannelType: string(TypeSlack),
-		AppID:       resp.Team.ID,
+		AppID:       p.appIDKey,
 	})
 	hadExisting := lookupErr == nil
 	if lookupErr != nil && !errors.Is(lookupErr, pgx.ErrNoRows) {
-		return CompletedInstall{}, fmt.Errorf("lookup existing slack installation: %w", lookupErr)
+		return db.ChannelInstallation{}, fmt.Errorf("lookup existing slack installation: %w", lookupErr)
 	}
 
-	// Team-keyed upsert: re-connecting the same team — including to represent a
+	// app-id-keyed upsert: re-installing the same app — including to represent a
 	// different agent in the SAME workspace — updates the existing row rather than
 	// colliding with the (channel_type, app_id) index. Its ON CONFLICT update is
-	// fenced to the same Multica workspace, so a team already owned by a DIFFERENT
-	// workspace updates no row and returns no rows — the atomic cross-workspace
-	// guard. (A Slack workspace stays bound to its first Multica workspace;
-	// migrating it requires operator/support intervention, not a silent re-OAuth.)
+	// fenced to the same Multica workspace (the atomic cross-workspace guard).
 	inst, err := qtx.UpsertChannelInstallationByAppID(ctx, db.UpsertChannelInstallationByAppIDParams{
-		WorkspaceID:     wsID,
-		AgentID:         agentID,
+		WorkspaceID:     p.wsID,
+		AgentID:         p.agentID,
 		ChannelType:     string(TypeSlack),
-		Config:          cfgJSON,
-		InstallerUserID: userID,
+		Config:          p.configJSON,
+		InstallerUserID: p.installerID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return CompletedInstall{}, ErrTeamOwnedByAnotherWorkspace
+			return db.ChannelInstallation{}, ErrTeamOwnedByAnotherWorkspace
 		}
-		return CompletedInstall{}, fmt.Errorf("upsert slack installation: %w", err)
+		return db.ChannelInstallation{}, fmt.Errorf("upsert slack installation: %w", err)
 	}
 
 	// Agent change within the same workspace: each existing chat_session is
@@ -304,49 +339,42 @@ func (s *InstallService) Complete(ctx context.Context, code, rawState string) (C
 	// (Elon review). Retire the stale chat-session bindings so the next inbound
 	// message creates a fresh session under the new agent. User bindings stay
 	// valid (same users, same workspace) and are intentionally kept.
-	if hadExisting && existing.AgentID != agentID {
+	if hadExisting && existing.AgentID != p.agentID {
 		if err := qtx.DeleteChannelChatSessionBindingsByInstallation(ctx, db.DeleteChannelChatSessionBindingsByInstallationParams{
 			InstallationID: inst.ID,
 			ChannelType:    string(TypeSlack),
 		}); err != nil {
-			return CompletedInstall{}, fmt.Errorf("retire stale chat-session bindings: %w", err)
+			return db.ChannelInstallation{}, fmt.Errorf("retire stale chat-session bindings: %w", err)
 		}
 	}
 
-	// Auto-bind the installer to their Slack user id (authed_user.id) so their
-	// own first DM / mention is not dropped as unbound — mirroring Feishu's
-	// installer auto-bind. If the installer's Slack id is already bound to a
-	// DIFFERENT Multica user the gated upsert returns no rows; that is a benign
-	// skip (the install still succeeds), not a reason to roll back. A real DB
-	// error, by contrast, poisons the tx and must abort the whole install.
-	if installerSlackID := resp.AuthedUser.ID; installerSlackID != "" {
+	// Auto-bind the installer to their Slack user id so their own first DM /
+	// mention is not dropped as unbound — mirroring Feishu's installer auto-bind.
+	// Skipped when installerSlackID is empty. An id already bound to a DIFFERENT
+	// Multica user is a benign skip (the gated upsert returns no rows); a real DB
+	// error poisons the tx and must abort the whole install.
+	if p.installerSlackID != "" {
 		if _, err := qtx.CreateChannelUserBinding(ctx, db.CreateChannelUserBindingParams{
-			WorkspaceID:    wsID,
-			MulticaUserID:  userID,
+			WorkspaceID:    p.wsID,
+			MulticaUserID:  p.installerID,
 			InstallationID: inst.ID,
 			ChannelType:    string(TypeSlack),
-			ChannelUserID:  installerSlackID,
+			ChannelUserID:  p.installerSlackID,
 			Config:         []byte(`{}`),
 		}); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				s.logger.WarnContext(ctx, "slack: installer already bound to a different user; skipping auto-bind",
 					"installation_id", util.UUIDToString(inst.ID))
 			} else {
-				return CompletedInstall{}, fmt.Errorf("bind installer: %w", err)
+				return db.ChannelInstallation{}, fmt.Errorf("bind installer: %w", err)
 			}
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return CompletedInstall{}, fmt.Errorf("commit slack install: %w", err)
+		return db.ChannelInstallation{}, fmt.Errorf("commit slack install: %w", err)
 	}
-	return CompletedInstall{
-		WorkspaceID:    wsID,
-		AgentID:        agentID,
-		InstallationID: inst.ID,
-		TeamID:         resp.Team.ID,
-		TeamName:       resp.Team.Name,
-	}, nil
+	return inst, nil
 }
 
 // ListByWorkspace returns every Slack installation in the workspace (active and

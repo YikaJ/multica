@@ -32,15 +32,26 @@ import (
 //
 // The bot token (xoxb-…, obtained per workspace via OAuth) authorizes Web API
 // calls (chat.postMessage) and is stored as base64-encoded secretbox ciphertext
-// (never plaintext), mirroring Feishu's app_secret_encrypted. There is NO
-// per-installation app-level token: under the B2 model the Socket Mode
-// connection uses ONE deployment-level app token (xapp-, from env), since
-// app-level tokens cannot be obtained through OAuth.
+// (never plaintext), mirroring Feishu's app_secret_encrypted.
+//
+// app_token_encrypted is set ONLY for "bring-your-own-app" (BYO) installations
+// (MUL-3666): the user pastes their own Slack app's app-level token (xapp-) so
+// each agent can have its own bot identity in the same Slack workspace. A BYO
+// installation drives its OWN Socket Mode connection from this token. Under the
+// hosted B2 model the field is empty — the single deployment-level app token
+// (xapp-, from env) serves every hosted installation, since app-level tokens
+// cannot be obtained through OAuth. The field's presence is therefore the
+// discriminator between a hosted installation (empty → AppConnector serves it)
+// and a BYO installation (set → it gets a dedicated connection). For BYO,
+// app_id holds the REAL Slack app id (parsed from the xapp- token), not the
+// team id; real app ids ("A…") never collide with team ids ("T…") in the
+// (channel_type, app_id) unique index, so hosted and BYO installs coexist.
 type installConfig struct {
 	AppID             string `json:"app_id"`
 	TeamID            string `json:"team_id,omitempty"`
 	BotUserID         string `json:"bot_user_id,omitempty"`
 	BotTokenEncrypted string `json:"bot_token_encrypted"`
+	AppTokenEncrypted string `json:"app_token_encrypted,omitempty"`
 }
 
 // credentials is the decoded, decrypted form the outbound sender runs on. The

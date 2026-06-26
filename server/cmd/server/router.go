@@ -787,6 +787,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Delete("/slack/installations/{installationId}", h.RevokeSlackInstallation)
 					r.Post("/slack/install/begin", h.BeginSlackInstall)
+					r.Post("/slack/install/byo", h.RegisterSlackBYO)
 				})
 			})
 		})
