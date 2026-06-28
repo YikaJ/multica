@@ -804,8 +804,31 @@ func writeMcpConfigToTemp(raw json.RawMessage) (string, error) {
 	return f.Name(), nil
 }
 
+// versionDetectTimeout bounds how long a single `<cli> --version` probe may
+// run. A healthy CLI answers in well under a second; a much longer wait means
+// the binary is wedged — e.g. a Homebrew-installed `claude` whose bun shim
+// never returns (MUL-3812). The bound matters because runtime registration
+// probes every configured agent sequentially (registerRuntimesForWorkspace),
+// and that loop runs on the daemon's startup critical path before /health
+// flips from "starting" to "running". Without a bound, one wedged CLI blocks
+// the loop forever: no other runtime gets registered, the daemon never reports
+// ready, and the desktop is stuck on "starting". With the bound, the wedged
+// probe returns a deadline error, the loop skips just that runtime, and every
+// healthy runtime still comes online.
+//
+// A var (not const) so tests can shorten it; nothing else mutates it.
+var versionDetectTimeout = 10 * time.Second
+
 func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, versionDetectTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, execPath, "--version")
+	// A wedged CLI may fork a child (e.g. the bun runtime behind `claude`) that
+	// inherits and keeps the stdout pipe open. Killing the CLI on context
+	// cancellation would not unblock cmd.Output(), which waits for that pipe to
+	// close. WaitDelay force-closes the pipes shortly after the context fires so
+	// the probe always returns instead of hanging on the surviving grandchild.
+	cmd.WaitDelay = 2 * time.Second
 	hideAgentWindow(cmd)
 	data, err := cmd.Output()
 	if err != nil {

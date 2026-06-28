@@ -1,8 +1,13 @@
 package agent
 
 import (
+	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 )
 
 func TestParseSemver(t *testing.T) {
@@ -135,6 +140,65 @@ func TestExtractVersionLine(t *testing.T) {
 				t.Errorf("extractVersionLine(%q) = %q, want %q", tt.raw, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDetectCLIVersionHealthy(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	script := filepath.Join(t.TempDir(), "fakecli")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho '2.1.5 (Claude Code)'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := detectCLIVersion(context.Background(), script)
+	if err != nil {
+		t.Fatalf("detectCLIVersion() error = %v", err)
+	}
+	if want := "2.1.5 (Claude Code)"; got != want {
+		t.Errorf("detectCLIVersion() = %q, want %q", got, want)
+	}
+}
+
+// TestDetectCLIVersionTimesOutOnWedgedCLI reproduces MUL-3812: a `--version`
+// probe that never returns must not block the caller. Even with an unbounded
+// parent context (which is what registerRuntimesForWorkspace passes), the probe
+// bounds itself and returns an error, so the sequential runtime-registration
+// loop can skip the wedged CLI and bring every healthy runtime online instead
+// of leaving the desktop stuck on "starting".
+func TestDetectCLIVersionTimesOutOnWedgedCLI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	script := filepath.Join(t.TempDir(), "wedgedcli")
+	// Sleeps far longer than the probe timeout and never prints a version —
+	// models a Homebrew/bun `claude` whose `--version` hangs. The backgrounded
+	// `sleep` also inherits the stdout pipe and outlives a kill of the shell,
+	// exercising the WaitDelay path that force-closes the pipe.
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := versionDetectTimeout
+	versionDetectTimeout = 200 * time.Millisecond
+	defer func() { versionDetectTimeout = orig }()
+
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() {
+		_, err := detectCLIVersion(context.Background(), script)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("detectCLIVersion() returned nil for a wedged CLI; want a timeout error")
+		}
+		if elapsed := time.Since(start); elapsed > 10*time.Second {
+			t.Errorf("detectCLIVersion() took %v; expected to bound near versionDetectTimeout", elapsed)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("detectCLIVersion() did not return; a wedged CLI blocked the probe (regression of MUL-3812)")
 	}
 }
 
