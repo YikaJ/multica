@@ -381,7 +381,7 @@ func TestCreateComment_ExplicitMentionKeepsPendingRouteWithoutDuplicateTask(t *t
 	}
 }
 
-func TestCreateComment_TopLevelFollowUpContinuesRecentAgentConversation(t *testing.T) {
+func TestCreateComment_TopLevelNewThreadFallsBackToAssignee(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -389,7 +389,7 @@ func TestCreateComment_TopLevelFollowUpContinuesRecentAgentConversation(t *testi
 
 	assigneeID := createHandlerTestAgent(t, "Conversation Assignee", nil)
 	conversationAgentID := createHandlerTestAgent(t, "Conversation Target", nil)
-	issueID := createCommentTriggerPreviewIssue(t, "top-level follow-up continues recent agent", "agent", assigneeID)
+	issueID := createCommentTriggerPreviewIssue(t, "top-level new thread falls back to assignee", "agent", assigneeID)
 
 	rootID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{
 		"content": fmt.Sprintf("[@Target](mention://agent/%s) ping test", conversationAgentID),
@@ -428,19 +428,19 @@ func TestCreateComment_TopLevelFollowUpContinuesRecentAgentConversation(t *testi
 	preview := previewCommentTriggersForTest(t, issueID, CommentTriggerPreviewRequest{
 		Content: followUpContent,
 	})
-	requirePreviewAgents(t, preview, conversationAgentID)
-	if preview.Agents[0].Source != string(commentTriggerSourceConversation) {
-		t.Fatalf("follow-up preview source = %q, want %q", preview.Agents[0].Source, commentTriggerSourceConversation)
+	requirePreviewAgents(t, preview, assigneeID)
+	if preview.Agents[0].Source != string(commentTriggerSourceIssueAssignee) {
+		t.Fatalf("new thread preview source = %q, want %q", preview.Agents[0].Source, commentTriggerSourceIssueAssignee)
 	}
 
 	postCommentForTriggerPreviewTest(t, issueID, map[string]any{
 		"content": followUpContent,
 	})
-	if got := countQueuedCommentTriggerTasks(t, issueID, conversationAgentID); got != 1 {
-		t.Fatalf("top-level follow-up queued conversation agent tasks = %d, want 1", got)
+	if got := countQueuedCommentTriggerTasks(t, issueID, conversationAgentID); got != 0 {
+		t.Fatalf("new thread queued conversation agent tasks = %d, want 0", got)
 	}
-	if got := countQueuedCommentTriggerTasks(t, issueID, assigneeID); got != 0 {
-		t.Fatalf("top-level follow-up queued assignee tasks = %d, want 0", got)
+	if got := countQueuedCommentTriggerTasks(t, issueID, assigneeID); got != 1 {
+		t.Fatalf("new thread queued assignee tasks = %d, want 1", got)
 	}
 }
 

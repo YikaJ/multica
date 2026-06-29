@@ -1490,23 +1490,6 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		}
 	}
 
-	if parentComment == nil {
-		trigger, handled, ok := h.routeConversationContinuation(ctx, issue, actorID, opts)
-		if handled {
-			if !ok {
-				return nil
-			}
-			if fallback, ok := h.routeAssigneeFallback(ctx, issue, actorType, actorID, opts); ok &&
-				uuidToString(fallback.Agent.ID) != uuidToString(trigger.Agent.ID) {
-				trigger.EscalationFallback = &commentEscalationFallback{
-					Agent: fallback.Agent,
-					Squad: fallback.Squad,
-				}
-			}
-			return []commentAgentTrigger{trigger}
-		}
-	}
-
 	if trigger, ok := h.routeAssigneeFallback(ctx, issue, actorType, actorID, opts); ok {
 		return []commentAgentTrigger{trigger}
 	}
@@ -1555,32 +1538,6 @@ func (h *Handler) routeReplyToParentAuthor(ctx context.Context, issue db.Issue, 
 type conversationRoutedAgentInfo struct {
 	SquadID pgtype.UUID
 	Active  bool
-}
-
-func (h *Handler) routeConversationContinuation(ctx context.Context, issue db.Issue, memberID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool, bool) {
-	comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
-		IssueID:     issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		Limit:       commentHardCap,
-	})
-	if err != nil {
-		return commentAgentTrigger{}, false, false
-	}
-
-	excludedID := uuidToString(opts.ExcludeTriggerCommentID)
-	for i := len(comments) - 1; i >= 0; i-- {
-		root := comments[i]
-		rootID := uuidToString(root.ID)
-		if excludedID != "" && rootID == excludedID {
-			continue
-		}
-		if root.ParentID.Valid || root.AuthorType != "member" || uuidToString(root.AuthorID) != memberID {
-			continue
-		}
-		return h.routeConversationOwnerForRoot(ctx, issue, root, comments, memberID, opts)
-	}
-
-	return commentAgentTrigger{}, false, false
 }
 
 func (h *Handler) routeThreadRootOwner(ctx context.Context, issue db.Issue, parent *db.Comment, memberID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool, bool) {
