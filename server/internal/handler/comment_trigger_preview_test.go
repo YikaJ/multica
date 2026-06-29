@@ -173,10 +173,11 @@ func requirePreviewAgents(t *testing.T, preview CommentTriggerPreviewResponse, w
 	}
 }
 
-func TestPreviewCommentTriggers_PlainReplyToMemberFallsBackToAssignee(t *testing.T) {
+func TestPreviewCommentTriggers_PlainReplyToMemberRootMentionRoutesToMentionedAgent(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
+	ctx := context.Background()
 
 	waltID := createHandlerTestAgent(t, "Preview Member Reply Walt", nil)
 	kimID := createHandlerTestAgent(t, "Preview Member Reply Kim", nil)
@@ -188,9 +189,15 @@ func TestPreviewCommentTriggers_PlainReplyToMemberFallsBackToAssignee(t *testing
 	requirePreviewAgents(t, topLevelPreview, waltID)
 
 	rootContent := fmt.Sprintf("[@Kim](mention://agent/%s) can you inspect this?", kimID)
-	rootID := insertMemberRootCommentForTriggerPreviewTest(t, issueID, rootContent)
-	if got := countQueuedCommentTriggerTasks(t, issueID, kimID); got != 0 {
-		t.Fatalf("fixture queued Kim tasks = %d, want 0", got)
+	rootID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{"content": rootContent})
+	if got := countQueuedCommentTriggerTasks(t, issueID, kimID); got != 1 {
+		t.Fatalf("root mention queued Kim tasks before completion = %d, want 1", got)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue SET status = 'completed'
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, kimID); err != nil {
+		t.Fatalf("complete Kim root task: %v", err)
 	}
 	if got := countQueuedCommentTriggerTasks(t, issueID, waltID); got != 0 {
 		t.Fatalf("fixture queued Walt tasks = %d, want 0", got)
@@ -206,34 +213,34 @@ func TestPreviewCommentTriggers_PlainReplyToMemberFallsBackToAssignee(t *testing
 		Content:  replyContent,
 		ParentID: &replyParentID,
 	})
-	requirePreviewAgents(t, replyPreview, waltID)
-	if replyPreview.Agents[0].Source != string(commentTriggerSourceIssueAssignee) {
-		t.Fatalf("reply preview source = %q, want %q", replyPreview.Agents[0].Source, commentTriggerSourceIssueAssignee)
+	requirePreviewAgents(t, replyPreview, kimID)
+	if replyPreview.Agents[0].Source != string(commentTriggerSourceConversation) {
+		t.Fatalf("reply preview source = %q, want %q", replyPreview.Agents[0].Source, commentTriggerSourceConversation)
 	}
 
 	postCommentForTriggerPreviewTest(t, issueID, replyBody)
-	if got := countQueuedCommentTriggerTasks(t, issueID, kimID); got != 0 {
-		t.Fatalf("plain reply queued Kim tasks = %d, want 0", got)
+	if got := countQueuedCommentTriggerTasks(t, issueID, kimID); got != 1 {
+		t.Fatalf("plain reply queued Kim tasks = %d, want 1", got)
 	}
-	if got := countQueuedCommentTriggerTasks(t, issueID, waltID); got != 1 {
-		t.Fatalf("plain reply queued Walt tasks = %d, want 1", got)
+	if got := countQueuedCommentTriggerTasks(t, issueID, waltID); got != 0 {
+		t.Fatalf("plain reply queued Walt tasks = %d, want 0", got)
 	}
 }
 
-// TestPreviewCommentTriggers_SquadAssigneePlainReplyFallsBackToLeader is the
+// TestPreviewCommentTriggers_SquadAssigneePlainReplyKeepsRootMentionOwner is the
 // cascade replacement for the old MUL-3744 inherited-mention scenario:
 //
 //   - Issue is assigned to a SQUAD (leader L).
 //   - Member root comment @mentions another agent (Kim).
 //   - Member posts a plain reply with no mention of its own ("hello").
 //
-// New cascade behavior: the reply has no explicit agent/squad mention and its
-// direct parent is a member, so it falls back to the squad leader. It still
-// fires exactly one agent.
-func TestPreviewCommentTriggers_SquadAssigneePlainReplyFallsBackToLeader(t *testing.T) {
+// New cascade behavior: the root's explicit @agent establishes the thread
+// owner, so the plain reply returns to Kim instead of the squad assignee.
+func TestPreviewCommentTriggers_SquadAssigneePlainReplyKeepsRootMentionOwner(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
+	ctx := context.Background()
 
 	leaderID := createHandlerTestAgent(t, "Preview Squad Leader L", nil)
 	kimID := createHandlerTestAgent(t, "Preview Squad Mention Kim", nil)
@@ -247,19 +254,23 @@ func TestPreviewCommentTriggers_SquadAssigneePlainReplyFallsBackToLeader(t *test
 	})
 	requirePreviewAgents(t, topLevelPreview, leaderID)
 
-	// Member root comment that @mentions Kim. It was inserted directly so the
-	// fixture has no queued task side effects before preview/create assertions.
 	rootContent := fmt.Sprintf("[@Kim](mention://agent/%s) can you take a look?", kimID)
-	rootID := insertMemberRootCommentForTriggerPreviewTest(t, issueID, rootContent)
+	rootID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{"content": rootContent})
 	if got := countQueuedCommentTriggerTasks(t, issueID, leaderID); got != 0 {
 		t.Fatalf("fixture queued leader tasks = %d, want 0", got)
 	}
-	if got := countQueuedCommentTriggerTasks(t, issueID, kimID); got != 0 {
-		t.Fatalf("fixture queued Kim tasks = %d, want 0", got)
+	if got := countQueuedCommentTriggerTasks(t, issueID, kimID); got != 1 {
+		t.Fatalf("root mention queued Kim tasks = %d, want 1", got)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue SET status = 'completed'
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, kimID); err != nil {
+		t.Fatalf("complete Kim root task: %v", err)
 	}
 
 	// Composer preview of a plain reply ("hello") to that root.
-	// Expected: only the squad leader fires via assignee fallback.
+	// Expected: only Kim fires via the root conversation owner.
 	replyContent := "hello"
 	replyParentID := rootID
 	replyBody := map[string]any{
@@ -270,19 +281,19 @@ func TestPreviewCommentTriggers_SquadAssigneePlainReplyFallsBackToLeader(t *test
 		Content:  replyContent,
 		ParentID: &replyParentID,
 	})
-	requirePreviewAgents(t, replyPreview, leaderID)
-	if replyPreview.Agents[0].Source != string(commentTriggerSourceIssueAssignee) {
-		t.Fatalf("reply preview source = %q, want %q (assignee fallback), got %+v",
-			replyPreview.Agents[0].Source, commentTriggerSourceIssueAssignee, replyPreview.Agents)
+	requirePreviewAgents(t, replyPreview, kimID)
+	if replyPreview.Agents[0].Source != string(commentTriggerSourceConversation) {
+		t.Fatalf("reply preview source = %q, want %q (conversation owner), got %+v",
+			replyPreview.Agents[0].Source, commentTriggerSourceConversation, replyPreview.Agents)
 	}
 
 	// Verify the create path matches the preview.
 	postCommentForTriggerPreviewTest(t, issueID, replyBody)
-	if got := countQueuedCommentTriggerTasks(t, issueID, leaderID); got != 1 {
-		t.Fatalf("after plain reply on squad issue: expected 1 leader task, got %d", got)
+	if got := countQueuedCommentTriggerTasks(t, issueID, leaderID); got != 0 {
+		t.Fatalf("after plain reply on squad issue: expected 0 leader tasks, got %d", got)
 	}
-	if got := countQueuedCommentTriggerTasks(t, issueID, kimID); got != 0 {
-		t.Fatalf("after plain reply on squad issue: expected 0 Kim tasks, got %d", got)
+	if got := countQueuedCommentTriggerTasks(t, issueID, kimID); got != 1 {
+		t.Fatalf("after plain reply on squad issue: expected 1 Kim task, got %d", got)
 	}
 }
 
@@ -341,6 +352,32 @@ func TestPreviewCommentTriggers_ExplicitMentionSuppressesAssigneeFallback(t *tes
 	}
 	if got := countQueuedCommentTriggerTasks(t, issueID, assigneeID); got != 0 {
 		t.Fatalf("assignee fallback queued tasks = %d, want 0 for explicit mention", got)
+	}
+}
+
+func TestCreateComment_ExplicitMentionKeepsPendingRouteWithoutDuplicateTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	mentionedID := createHandlerTestAgent(t, "Explicit Pending Route Target", nil)
+	issueID := createCommentTriggerPreviewIssue(t, "explicit mention pending route", "", "")
+	content := fmt.Sprintf("[@Target](mention://agent/%s) please take this", mentionedID)
+
+	postCommentForTriggerPreviewTest(t, issueID, map[string]any{"content": content})
+	if got := countQueuedCommentTriggerTasks(t, issueID, mentionedID); got != 1 {
+		t.Fatalf("initial mention queued tasks = %d, want 1", got)
+	}
+
+	preview := previewCommentTriggersForTest(t, issueID, map[string]any{"content": content + " again"})
+	requirePreviewAgents(t, preview, mentionedID)
+	if preview.Agents[0].Source != string(commentTriggerSourceMentionAgent) {
+		t.Fatalf("preview source = %q, want %q", preview.Agents[0].Source, commentTriggerSourceMentionAgent)
+	}
+
+	postCommentForTriggerPreviewTest(t, issueID, map[string]any{"content": content + " again"})
+	if got := countQueuedCommentTriggerTasks(t, issueID, mentionedID); got != 1 {
+		t.Fatalf("duplicate pending mention queued tasks = %d, want 1", got)
 	}
 }
 
@@ -841,7 +878,10 @@ func TestPreviewCommentTriggers_EditExclusionDoesNotIgnoreOtherCommentPendingTas
 		"content":            content,
 		"editing_comment_id": editingCommentID,
 	})
-	requirePreviewAgents(t, preview)
+	requirePreviewAgents(t, preview, agentID)
+	if preview.Agents[0].Source != string(commentTriggerSourceMentionAgent) {
+		t.Fatalf("preview source = %q, want %q", preview.Agents[0].Source, commentTriggerSourceMentionAgent)
+	}
 }
 
 func TestUpdateComment_SuppressAgentIDsFiltersEditRetrigger(t *testing.T) {
@@ -976,8 +1016,16 @@ func TestPreviewCommentTriggers_AllSuppressesAssigneeAndPendingDedupes(t *testin
 	pendingPreview := previewCommentTriggersForTest(t, issueID, map[string]any{
 		"content": "can you continue here?",
 	})
-	if got := len(pendingPreview.Agents); got != 0 {
-		t.Fatalf("pending preview agents = %d, want 0: %+v", got, pendingPreview.Agents)
+	requirePreviewAgents(t, pendingPreview, agentID)
+	if pendingPreview.Agents[0].Source != string(commentTriggerSourceIssueAssignee) {
+		t.Fatalf("pending preview source = %q, want %q", pendingPreview.Agents[0].Source, commentTriggerSourceIssueAssignee)
+	}
+
+	postCommentForTriggerPreviewTest(t, issueID, map[string]any{
+		"content": "can you continue here?",
+	})
+	if got := countQueuedCommentTriggerTasks(t, issueID, agentID); got != 1 {
+		t.Fatalf("pending assignee create queued tasks = %d, want 1", got)
 	}
 }
 

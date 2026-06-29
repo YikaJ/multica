@@ -199,14 +199,14 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *test
 			want:        false,
 			description: "@squad routes the issue to that squad's leader — current leader stays out",
 		},
-			{
-				name:        "agent comment with @agent does not implicitly trigger leader",
-				content:     "delegating to [@Other](mention://agent/" + fx.OtherID + ")",
-				authorType:  "agent",
-				authorID:    fx.OtherID,
-				want:        false,
-				description: "agent→agent routing now requires explicit mentions only; assignee fallback is member-authored only",
-			},
+		{
+			name:        "agent comment with @agent does not implicitly trigger leader",
+			content:     "delegating to [@Other](mention://agent/" + fx.OtherID + ")",
+			authorType:  "agent",
+			authorID:    fx.OtherID,
+			want:        false,
+			description: "agent→agent routing now requires explicit mentions only; assignee fallback is member-authored only",
+		},
 	}
 
 	for _, tc := range cases {
@@ -287,16 +287,14 @@ func TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredCommentsDoNotFallback(t 
 	})
 }
 
-// TestCreateComment_SquadPlainReplyToMemberParentFallsBackToLeader drives the
+// TestCreateComment_SquadPlainReplyToMemberParentKeepsRootMentionOwner drives the
 // full CreateComment handler to lock the cascade's reply behavior:
 //
 //   - A member top-level comment that @mentions another agent does NOT
 //     enqueue the squad leader (the mentioned agent owns the next step).
-//   - A subsequent member reply to that member-authored parent does NOT inherit
-//     the parent's mention; with no explicit mention and no agent parent, it
-//     falls back to the assigned squad leader.
-//
-func TestCreateComment_SquadPlainReplyToMemberParentFallsBackToLeader(t *testing.T) {
+//   - A subsequent member reply to that member-authored root with no explicit
+//     agent mention continues to the root owner instead of the assignee.
+func TestCreateComment_SquadPlainReplyToMemberParentKeepsRootMentionOwner(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -357,20 +355,20 @@ func TestCreateComment_SquadPlainReplyToMemberParentFallsBackToLeader(t *testing
 		t.Fatalf("complete OtherAgent parent task: %v", err)
 	}
 
-		// 3. Member posts a reply in the same thread with NO mentions.
-		//    The parent's @OtherAgent mention is not inherited, so the reply falls
-		//    back to the assigned squad leader.
-		postMemberComment(map[string]any{
-			"content":   "any update?",
-			"parent_id": parent.ID,
-		})
-		if got := countQueued(fx.LeaderID); got != 1 {
-			t.Fatalf("after plain reply: expected 1 leader task via fallback, got %d", got)
-		}
-		if got := countQueued(fx.OtherID); got != 0 {
-			t.Fatalf("after plain reply: expected 0 OtherAgent tasks, got %d", got)
-		}
+	// 3. Member posts a reply in the same thread with NO mentions.
+	//    The root's @OtherAgent mention owns the thread, so the reply returns
+	//    to OtherAgent instead of falling back to the assigned squad leader.
+	postMemberComment(map[string]any{
+		"content":   "any update?",
+		"parent_id": parent.ID,
+	})
+	if got := countQueued(fx.LeaderID); got != 0 {
+		t.Fatalf("after plain reply: expected 0 leader tasks, got %d", got)
 	}
+	if got := countQueued(fx.OtherID); got != 1 {
+		t.Fatalf("after plain reply: expected 1 OtherAgent task, got %d", got)
+	}
+}
 
 // TestCreateComment_DualRoleAgentWorkerCommentDoesNotImplicitlyWakeLeader pins
 // the cascade's agent-authored loop guard. Scenario:

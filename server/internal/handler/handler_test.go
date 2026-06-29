@@ -3330,10 +3330,10 @@ func TestDaemonRegisterMissingWorkspaceReturns404(t *testing.T) {
 	}
 }
 
-// TestRepliesDoNotInheritParentMentions verifies that replies do NOT inherit
-// parent-comment mentions. Explicit mentions are one-shot handoffs, not thread
-// ownership.
-func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
+// TestRootMentionOwnerRoutesMemberReplyButNotAgentReply verifies that a member
+// root @mention owns later member replies, while agent-authored acknowledgments
+// still do not self-expand the route.
+func TestRootMentionOwnerRoutesMemberReplyButNotAgentReply(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -3417,7 +3417,7 @@ func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
 	}
 
 	// 3. Agent A posts a reply in the same thread with NO mentions.
-	// With the fix, this must NOT inherit the parent mention of Agent B.
+	// Agent-authored comments still do not inherit the root mention of Agent B.
 	// resolveActor requires X-Task-ID paired with X-Agent-ID to trust the
 	// agent identity, so we seed a task that belongs to agent A.
 	agentATask := createHandlerTestTaskForAgent(t, agentA)
@@ -3436,7 +3436,7 @@ func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
 	cancelTasks(agentB)
 
 	// 5. Member posts a reply in the same thread with NO mentions.
-	// This must not inherit the parent mention or re-trigger Agent B.
+	// The member-authored root @mention owns the thread, so this routes to B.
 	w = postComment(issueID, map[string]any{
 		"content":   "Thanks for the review.",
 		"parent_id": parentComment.ID,
@@ -3444,8 +3444,8 @@ func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("member reply: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	if countTasks(agentB) != 0 {
-		t.Fatalf("expected 0 tasks for Agent B after member reply (no parent inheritance), got %d", countTasks(agentB))
+	if countTasks(agentB) != 1 {
+		t.Fatalf("expected 1 task for Agent B after member reply (root owner), got %d", countTasks(agentB))
 	}
 }
 
