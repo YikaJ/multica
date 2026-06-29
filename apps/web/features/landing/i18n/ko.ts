@@ -275,7 +275,6 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           changes: [],
           features: [
             "이제 자체 Slack 앱으로 Multica를 Slack에 연결할 수 있고, 설치마다 별도의 Socket Mode 연결로 동작합니다. Connect 다이얼로그에 새 설치 가이드 링크가 추가되어 단계별로 따라갈 수 있습니다.",
-            "셀프 호스팅 설치 과정이 익명·옵트인 출처 비콘을 보낼 수 있게 되어, 새 자체 호스팅 팀이 어떤 경로로 Multica를 알게 되었는지 더 잘 파악할 수 있습니다.",
             "Issue 액션에 '상위 Issue 해제'가 추가되어, 다른 상위를 먼저 고르지 않고도 하위 Issue를 즉시 분리할 수 있습니다.",
           ],
           improvements: [

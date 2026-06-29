@@ -300,7 +300,6 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         changes: [],
         features: [
           "你现在可以用自己的 Slack 应用把 Multica 接到 Slack，每个安装跑在独立的 Socket Mode 连接上；Connect 弹窗里也新增了配置入口，直接跳转到完整的配置指引。",
-          "自托管引导流程支持匿名、可选的来源信标，让我们更了解新加入的自托管团队是从哪些渠道认识 Multica 的。",
           "Issue 操作菜单新增「移除父级 Issue」，可以直接断开父子关系，不用先去挑一个新的父级。",
         ],
         improvements: [

@@ -300,7 +300,6 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         changes: [],
         features: [
           "You can now connect Multica to Slack using your own Slack app, with each installation running on its own Socket Mode connection — and the Connect dialog links straight to a new step-by-step setup guide.",
-          "The self-host setup flow can send an anonymous, opt-in beacon noting where you came from, so we can better support the channels through which new self-hosted teams discover Multica.",
           "Issues now have a Remove parent action, so you can detach a sub-Issue without first having to pick a different parent.",
         ],
         improvements: [

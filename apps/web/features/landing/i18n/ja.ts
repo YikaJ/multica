@@ -276,7 +276,6 @@ export function createJaDict(allowSignup: boolean): LandingDict {
           changes: [],
           features: [
             "Multica を自前の Slack アプリで Slack に接続できるようになり、インストールごとに独立した Socket Mode 接続で動作します。Connect ダイアログから新しいセットアップ ガイドへ直接遷移できます。",
-            "セルフホストのセットアップで、新しいチームが Multica を知ったきっかけを把握するための匿名・オプトインのソース ビーコンを送信できるようになりました。",
             "Issue のアクションに「親 Issue を解除」が追加され、別の親を選び直さなくても子 Issue を直接切り離せます。",
           ],
           improvements: [
