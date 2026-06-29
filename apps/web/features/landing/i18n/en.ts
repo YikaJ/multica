@@ -296,10 +296,9 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.32",
         date: "2026-06-29",
-        title: "Bring-your-own Slack app, sturdier daemon reconnects, and friendlier attachment previews",
+        title: "Detach sub-Issues, sturdier daemon reconnects, and friendlier attachment previews",
         changes: [],
         features: [
-          "You can now connect Multica to Slack using your own Slack app, with each installation running on its own Socket Mode connection — and the Connect dialog links straight to a new step-by-step setup guide.",
           "Issues now have a Remove parent action, so you can detach a sub-Issue without first having to pick a different parent.",
         ],
         improvements: [

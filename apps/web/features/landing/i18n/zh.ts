@@ -296,10 +296,9 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.32",
         date: "2026-06-29",
-        title: "Slack 自带 App 接入、守护进程重连更稳，附件预览处处可开",
+        title: "支持解除父子 Issue、守护进程重连更稳，附件预览处处可开",
         changes: [],
         features: [
-          "你现在可以用自己的 Slack 应用把 Multica 接到 Slack，每个安装跑在独立的 Socket Mode 连接上；Connect 弹窗里也新增了配置入口，直接跳转到完整的配置指引。",
           "Issue 操作菜单新增「移除父级 Issue」，可以直接断开父子关系，不用先去挑一个新的父级。",
         ],
         improvements: [

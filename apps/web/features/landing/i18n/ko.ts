@@ -271,10 +271,9 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           version: "0.3.32",
           date: "2026-06-29",
-          title: "자체 Slack 앱 연결, 더 견고한 데몬 재연결, 어디서나 열리는 첨부 미리보기",
+          title: "하위 Issue 분리, 더 견고한 데몬 재연결, 어디서나 열리는 첨부 미리보기",
           changes: [],
           features: [
-            "이제 자체 Slack 앱으로 Multica를 Slack에 연결할 수 있고, 설치마다 별도의 Socket Mode 연결로 동작합니다. Connect 다이얼로그에 새 설치 가이드 링크가 추가되어 단계별로 따라갈 수 있습니다.",
             "Issue 액션에 '상위 Issue 해제'가 추가되어, 다른 상위를 먼저 고르지 않고도 하위 Issue를 즉시 분리할 수 있습니다.",
           ],
           improvements: [

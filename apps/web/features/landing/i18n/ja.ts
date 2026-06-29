@@ -272,10 +272,9 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           version: "0.3.32",
           date: "2026-06-29",
-          title: "自前 Slack アプリ接続、より堅牢なデーモン再接続、どこからでも開ける添付プレビュー",
+          title: "サブ Issue の切り離し、より堅牢なデーモン再接続、どこからでも開ける添付プレビュー",
           changes: [],
           features: [
-            "Multica を自前の Slack アプリで Slack に接続できるようになり、インストールごとに独立した Socket Mode 接続で動作します。Connect ダイアログから新しいセットアップ ガイドへ直接遷移できます。",
             "Issue のアクションに「親 Issue を解除」が追加され、別の親を選び直さなくても子 Issue を直接切り離せます。",
           ],
           improvements: [
