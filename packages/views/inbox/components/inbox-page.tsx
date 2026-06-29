@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -74,6 +74,17 @@ export function InboxPage() {
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
 
   const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
+
+  // The detail pane mounts a heavy IssueDetail subtree (keyed by issue_id, so
+  // it fully remounts on switch). Drive it off a deferred copy of the selection
+  // so clicking a row stays urgent — the list highlight + mark-read fire
+  // immediately on `selectedKey` — while the expensive remount renders at
+  // transition priority. React keeps the previous detail painted until the new
+  // one is ready and can drop intermediate work when the user clicks through
+  // the list quickly, which is what removes the "frozen on click" feel.
+  const deferredSelectedKey = useDeferredValue(selectedKey);
+  const detailSelected =
+    items.find((i) => (i.issue_id ?? i.id) === deferredSelectedKey) ?? null;
 
   // Track the last key we actually resolved against the inbox list. Lets the
   // fallback effect distinguish "shared-link to a notification not in our
@@ -286,18 +297,18 @@ export function InboxPage() {
     </div>
   );
 
-  const detailContent = selected?.issue_id ? (
+  const detailContent = detailSelected?.issue_id ? (
     // Key by issue_id (not inbox-item id): a new comment/reaction generates a
     // new inbox notification for the same issue, and the dedup helper picks the
     // newest one — keying on its id would remount IssueDetail on every event,
     // wiping the comment composer draft and resetting scroll position.
-    <ErrorBoundary resetKeys={[selected.issue_id]}>
+    <ErrorBoundary resetKeys={[detailSelected.issue_id]}>
       <IssueDetail
-        key={selected.issue_id}
-        issueId={selected.issue_id}
+        key={detailSelected.issue_id}
+        issueId={detailSelected.issue_id}
         defaultSidebarOpen={false}
         layoutId="multica_inbox_issue_detail_layout"
-        highlightCommentId={selected.details?.comment_id ?? undefined}
+        highlightCommentId={detailSelected.details?.comment_id ?? undefined}
         onDelete={() => {
           // Issue deletion CASCADE-deletes the inbox item server-side, and the
           // issue:deleted WS event prunes it from the inbox cache. Just clear
@@ -306,31 +317,31 @@ export function InboxPage() {
           setSelectedKey("");
         }}
         onDone={() => {
-          handleArchive(selected.id);
+          handleArchive(detailSelected.id);
         }}
       />
     </ErrorBoundary>
-  ) : selected ? (
+  ) : detailSelected ? (
     <div className="p-6">
-      <h2 className="text-lg font-semibold">{getInboxDisplayTitle(selected)}</h2>
+      <h2 className="text-lg font-semibold">{getInboxDisplayTitle(detailSelected)}</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        {typeLabels[selected.type]} · {timeAgo(selected.created_at)}
+        {typeLabels[detailSelected.type]} · {timeAgo(detailSelected.created_at)}
       </p>
-      {selected.body && (
+      {detailSelected.body && (
         <div className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
-          {selected.body}
+          {detailSelected.body}
         </div>
       )}
-      {selected.type === "quick_create_failed" && selected.details?.original_prompt && (
+      {detailSelected.type === "quick_create_failed" && detailSelected.details?.original_prompt && (
         <div className="mt-4 rounded-md border bg-muted/40 p-3">
           <p className="text-xs font-medium text-muted-foreground">
             {t(($) => $.detail.original_input)}
           </p>
-          <p className="mt-1 whitespace-pre-wrap text-sm">{selected.details.original_prompt}</p>
+          <p className="mt-1 whitespace-pre-wrap text-sm">{detailSelected.details.original_prompt}</p>
         </div>
       )}
       <div className="mt-4 flex gap-2">
-        {selected.type === "quick_create_failed" && (
+        {detailSelected.type === "quick_create_failed" && (
           <Button
             size="sm"
             onClick={() => {
@@ -338,8 +349,8 @@ export function InboxPage() {
               // user can recover their input in the full editor instead of
               // retyping. The agent picker hint becomes the assignee
               // candidate (still editable).
-              const prompt = selected.details?.original_prompt ?? "";
-              const agentId = selected.details?.agent_id;
+              const prompt = detailSelected.details?.original_prompt ?? "";
+              const agentId = detailSelected.details?.agent_id;
               useIssueDraftStore.getState().setDraft({
                 description: prompt,
                 ...(agentId
@@ -355,7 +366,7 @@ export function InboxPage() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => handleArchive(selected.id)}
+          onClick={() => handleArchive(detailSelected.id)}
         >
           <Archive className="mr-1.5 h-3.5 w-3.5" />
           {t(($) => $.detail.archive)}
@@ -388,8 +399,10 @@ export function InboxPage() {
       );
     }
 
-    // Mobile: show detail full-screen when an item is selected
-    if (selected) {
+    // Mobile: show detail full-screen when an item is selected. Gate on the
+    // deferred selection so the screen swap and its content stay in lockstep
+    // (no blank frame between switching screens and the detail resolving).
+    if (detailSelected) {
       return (
         <div className="flex flex-1 flex-col min-h-0">
           <div className="flex h-12 shrink-0 items-center border-b px-2">

@@ -536,7 +536,12 @@ describe("IssueDetail (shared)", () => {
       expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
     });
 
-    expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+    // The description editor is deferred one animation frame past first paint
+    // (useDeferredMount) to keep its Tiptap mount off the synchronous
+    // issue-switch commit, so await it rather than asserting synchronously.
+    expect(
+      await screen.findByDisplayValue("Add JWT auth to the backend"),
+    ).toBeInTheDocument();
   });
 
   it("opts the description editor into the unmount flush", async () => {

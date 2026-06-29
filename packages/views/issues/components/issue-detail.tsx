@@ -30,7 +30,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, ReadonlyContent, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -78,6 +78,7 @@ import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
+import { useDeferredMount } from "../hooks/use-deferred-mount";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
@@ -1239,6 +1240,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [id, items.length, t]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
+  // Defer the heavy description Tiptap editor past the first paint so it stays
+  // out of the synchronous remount commit when switching issues in the inbox
+  // (where IssueDetail is keyed by issue_id). Until it mounts we show the
+  // description as read-only markdown — visually identical, near-zero cost.
+  const { ready: descEditorReady, mountNow: mountDescEditor } = useDeferredMount(id);
+  // Only steal focus into the editor when the user actively clicked the
+  // read-only placeholder — never on the automatic post-paint mount, which
+  // would yank focus to the description on every issue switch.
+  const descFocusOnMountRef = useRef(false);
+  useEffect(() => {
+    if (descEditorReady && descFocusOnMountRef.current) {
+      descFocusOnMountRef.current = false;
+      descEditorRef.current?.focus();
+    }
+  }, [descEditorReady]);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
@@ -1938,6 +1954,30 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           )}
 
           <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
+            {!descEditorReady ? (
+              // Read-only stand-in shown for the one frame before the editor
+              // hydrates (or until the user clicks in). Keeps the heavy Tiptap
+              // mount off the synchronous issue-switch commit; a mousedown
+              // upgrades it immediately so a quick click-to-edit still lands.
+              <div
+                className="min-h-[1.5rem] cursor-text"
+                onMouseDown={() => {
+                  descFocusOnMountRef.current = true;
+                  mountDescEditor();
+                }}
+              >
+                {issue.description?.trim() ? (
+                  <ReadonlyContent
+                    content={issue.description}
+                    attachments={descEditorAttachments}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {t(($) => $.detail.desc_placeholder)}
+                  </p>
+                )}
+              </div>
+            ) : (
             <ContentEditor
               ref={descEditorRef}
               key={id}
@@ -1975,6 +2015,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               currentIssueId={id}
               attachments={descEditorAttachments}
             />
+            )}
 
             <div className="flex items-center gap-1 mt-3">
               <ReactionBar
