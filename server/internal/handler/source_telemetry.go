@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/sourcebeacon"
 )
 
@@ -56,20 +57,16 @@ func (h *Handler) HandleSelfHostSourceBeacon(w http.ResponseWriter, r *http.Requ
 	}
 
 	for _, ch := range channels {
-		h.Analytics.Capture(analytics.Event{
-			Name: analytics.EventSelfHostSourceChannel,
-			// distinct_id carries a ":" so the PostHog client never derives a
-			// user_id property from it; combined with the non-person flag, no
-			// PostHog person is created for the anonymous hash.
-			DistinctID: "selfhost:" + p.UIDHash,
-			UUID:       sourcebeacon.EventUUID(p.InstanceHash, p.UIDHash, ch),
-			Properties: map[string]any{
-				"source":                  ch,
-				"deployment":              "self_host",
-				"instance_hash":           p.InstanceHash,
-				"$process_person_profile": false,
-			},
-		})
+		ev := analytics.SelfHostSourceChannel(
+			p.InstanceHash,
+			p.UIDHash,
+			ch,
+			sourcebeacon.EventUUID(p.InstanceHash, p.UIDHash, ch),
+		)
+		// RecordEvent (not a naked Capture) so the event also increments the
+		// Prometheus counter via IncForEvent. Not IsMetricsOnly, so it still
+		// ships to PostHog. m==nil-safe (tests / metrics-disabled deploys).
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, ev)
 	}
 
 	w.WriteHeader(http.StatusNoContent)

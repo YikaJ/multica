@@ -477,6 +477,27 @@ func OnboardingQuestionnaireSubmitted(userID string, source []string, role strin
 	}
 }
 
+// SelfHostSourceChannel builds the self-host onboarding source beacon event
+// (MUL-3708) for one channel. The caller supplies the deterministic event
+// uuid (from sourcebeacon.EventUUID) because analytics must not import
+// sourcebeacon. distinct_id carries a ":" so the PostHog client never derives
+// a user_id from it, and $process_person_profile=false keeps the anonymous
+// hash from spawning a PostHog person. Carries no identity — only the channel
+// plus the per-instance hashes.
+func SelfHostSourceChannel(instanceHash, uidHash, channel, eventUUID string) Event {
+	return Event{
+		Name:       EventSelfHostSourceChannel,
+		DistinctID: "selfhost:" + uidHash,
+		UUID:       eventUUID,
+		Properties: map[string]any{
+			"source":                  channel,
+			"deployment":              "self_host",
+			"instance_hash":           instanceHash,
+			"$process_person_profile": false,
+		},
+	}
+}
+
 // AgentCreated fires whenever a new agent is added to a workspace — not
 // just inside onboarding. `isFirstAgentInWorkspace` lets the funnel
 // isolate the Step 4 signal from later agent additions.

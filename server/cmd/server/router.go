@@ -212,9 +212,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// to a user_id. A load failure / missing salt leaves it disabled. The
 	// upstream defaults to Multica's public API; MULTICA_SOURCE_BEACON_URL
 	// overrides it (used by tests / staging).
+	beaconEnabled := sourcebeacon.ShouldSendFromEnv()
+	var beaconSalt string
+	if beaconEnabled {
+		// Only the rare production self-host needs the salt — skip the
+		// construction-time DB call entirely otherwise (this also keeps the
+		// router constructible with a nil pool in routing-only tests).
+		// Bounded ctx so a stalled DB cannot slow startup.
+		saltCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		beaconSalt = loadInstanceSalt(saltCtx, pool)
+		cancel()
+	}
 	h.SourceBeacon = sourcebeacon.NewSender(sourcebeacon.SenderConfig{
-		Enabled:     sourcebeacon.ShouldSendFromEnv(),
-		Salt:        loadInstanceSalt(context.Background(), pool),
+		Enabled:     beaconEnabled,
+		Salt:        beaconSalt,
 		UpstreamURL: os.Getenv("MULTICA_SOURCE_BEACON_URL"),
 	})
 
@@ -1340,6 +1351,11 @@ func cloudRuntimeFleetURLFromEnv() string {
 // treats an empty salt as "disabled", so a DB hiccup degrades to no
 // telemetry rather than crashing boot.
 func loadInstanceSalt(ctx context.Context, pool *pgxpool.Pool) string {
+	// Routing-only tests construct the router with a nil pool; the beacon is
+	// disabled there anyway, so there is nothing to load.
+	if pool == nil {
+		return ""
+	}
 	if _, err := pool.Exec(ctx, `INSERT INTO system_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`); err != nil {
 		slog.Warn("sourcebeacon: ensure system_settings row failed; beacon disabled", "error", err)
 		return ""
