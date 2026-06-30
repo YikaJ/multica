@@ -1559,6 +1559,13 @@ func (h *Handler) routeConversationOwnersForRoot(ctx context.Context, issue db.I
 	if !root.ID.Valid || root.AuthorType != "member" {
 		return nil, false
 	}
+	if trigger, hasExplicitOwner, ok := h.routeFirstExplicitRootMentionOwner(ctx, issue, root, memberID, opts); hasExplicitOwner {
+		if !ok {
+			return nil, true
+		}
+		return []commentAgentTrigger{trigger}, true
+	}
+
 	rootID := uuidToString(root.ID)
 	excludedID := uuidToString(opts.ExcludeTriggerCommentID)
 
@@ -1596,6 +1603,35 @@ func (h *Handler) routeConversationOwnersForRoot(ctx context.Context, issue db.I
 		}
 	}
 	return triggers, true
+}
+
+func (h *Handler) routeFirstExplicitRootMentionOwner(ctx context.Context, issue db.Issue, root db.Comment, memberID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool, bool) {
+	for _, mention := range util.ParseMentions(root.Content) {
+		switch mention.Type {
+		case "agent":
+			agentID, err := util.ParseUUID(mention.ID)
+			if err != nil {
+				return commentAgentTrigger{}, true, false
+			}
+			trigger, ok := h.routeConversationContinuationToAgent(ctx, issue, agentID, pgtype.UUID{}, memberID, opts)
+			return trigger, true, ok
+		case "squad":
+			squadID, err := util.ParseUUID(mention.ID)
+			if err != nil {
+				return commentAgentTrigger{}, true, false
+			}
+			squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+				ID:          squadID,
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err != nil {
+				return commentAgentTrigger{}, true, false
+			}
+			trigger, ok := h.routeConversationContinuationToAgent(ctx, issue, squad.LeaderID, squadID, memberID, opts)
+			return trigger, true, ok
+		}
+	}
+	return commentAgentTrigger{}, false, false
 }
 
 func (h *Handler) routeConversationContinuationToAgent(ctx context.Context, issue db.Issue, agentID, squadID pgtype.UUID, memberID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {

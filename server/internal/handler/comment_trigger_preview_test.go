@@ -227,7 +227,7 @@ func TestPreviewCommentTriggers_PlainReplyToMemberRootMentionRoutesToMentionedAg
 	}
 }
 
-func TestPreviewCommentTriggers_PlainReplyToMultiAgentRootRoutesAllOwners(t *testing.T) {
+func TestPreviewCommentTriggers_PlainReplyToMultiAgentRootRoutesFirstMentionedOwner(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -266,11 +266,9 @@ func TestPreviewCommentTriggers_PlainReplyToMultiAgentRootRoutesAllOwners(t *tes
 		Content:  replyContent,
 		ParentID: &replyParentID,
 	})
-	requirePreviewAgents(t, replyPreview, agentAID, agentBID)
-	for _, agent := range replyPreview.Agents {
-		if agent.Source != string(commentTriggerSourceConversation) {
-			t.Fatalf("reply preview source for %s = %q, want %q", agent.ID, agent.Source, commentTriggerSourceConversation)
-		}
+	requirePreviewAgents(t, replyPreview, agentAID)
+	if replyPreview.Agents[0].Source != string(commentTriggerSourceConversation) {
+		t.Fatalf("reply preview source = %q, want %q", replyPreview.Agents[0].Source, commentTriggerSourceConversation)
 	}
 
 	postCommentForTriggerPreviewTest(t, issueID, map[string]any{
@@ -280,8 +278,8 @@ func TestPreviewCommentTriggers_PlainReplyToMultiAgentRootRoutesAllOwners(t *tes
 	if got := countQueuedCommentTriggerTasks(t, issueID, agentAID); got != 1 {
 		t.Fatalf("plain reply queued agent A tasks = %d, want 1", got)
 	}
-	if got := countQueuedCommentTriggerTasks(t, issueID, agentBID); got != 1 {
-		t.Fatalf("plain reply queued agent B tasks = %d, want 1", got)
+	if got := countQueuedCommentTriggerTasks(t, issueID, agentBID); got != 0 {
+		t.Fatalf("plain reply queued agent B tasks = %d, want 0", got)
 	}
 	if got := countQueuedCommentTriggerTasks(t, issueID, assigneeID); got != 0 {
 		t.Fatalf("plain reply queued assignee tasks = %d, want 0", got)
