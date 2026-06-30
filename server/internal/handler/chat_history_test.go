@@ -48,6 +48,16 @@ func newChatHistoryTask(t *testing.T, chatSession bool) string {
 	return taskID
 }
 
+// taskActorRequest builds a /api/chat/history request as the Auth middleware
+// would leave it for a mat_ task token: the server-set X-Actor-Source=task_token
+// plus the authoritative X-Task-ID.
+func taskActorRequest(taskID string) *http.Request {
+	req := newRequest("GET", "/api/chat/history", nil)
+	req.Header.Set("X-Actor-Source", "task_token")
+	req.Header.Set("X-Task-ID", taskID)
+	return req
+}
+
 func withSlackHistory(t *testing.T, r ChatChannelHistoryReader) {
 	t.Helper()
 	orig := testHandler.SlackHistory
@@ -70,8 +80,8 @@ func TestGetChatChannelHistory_Success(t *testing.T) {
 	}}
 	withSlackHistory(t, fake)
 
-	req := newRequest("GET", "/api/chat/history?limit=10", nil)
-	req.Header.Set("X-Task-ID", taskID)
+	req := taskActorRequest(taskID)
+	req.URL.RawQuery = "limit=10"
 	w := httptest.NewRecorder()
 	testHandler.GetChatChannelHistory(w, req)
 
@@ -97,10 +107,8 @@ func TestGetChatChannelHistory_NoBindingReturnsNote(t *testing.T) {
 	taskID := newChatHistoryTask(t, true)
 	withSlackHistory(t, &fakeChatHistoryReader{err: slack.ErrNoSlackSession})
 
-	req := newRequest("GET", "/api/chat/history", nil)
-	req.Header.Set("X-Task-ID", taskID)
 	w := httptest.NewRecorder()
-	testHandler.GetChatChannelHistory(w, req)
+	testHandler.GetChatChannelHistory(w, taskActorRequest(taskID))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
@@ -119,10 +127,8 @@ func TestGetChatChannelHistory_NilReaderReturnsNote(t *testing.T) {
 	taskID := newChatHistoryTask(t, true)
 	withSlackHistory(t, nil)
 
-	req := newRequest("GET", "/api/chat/history", nil)
-	req.Header.Set("X-Task-ID", taskID)
 	w := httptest.NewRecorder()
-	testHandler.GetChatChannelHistory(w, req)
+	testHandler.GetChatChannelHistory(w, taskActorRequest(taskID))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
@@ -134,11 +140,40 @@ func TestGetChatChannelHistory_NilReaderReturnsNote(t *testing.T) {
 	}
 }
 
+// TestGetChatChannelHistory_RejectsForgedTaskID is the security regression test
+// for Niko's must-fix: a normal request (no server-set X-Actor-Source) that
+// forges X-Task-ID — exactly what a workspace member could do with a JWT / mul_
+// PAT, since the Auth middleware does NOT strip a client-sent X-Task-ID — must be
+// rejected, never served another session's history.
+func TestGetChatChannelHistory_RejectsForgedTaskID(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("requires test database")
+	}
+	taskID := newChatHistoryTask(t, true)
+	fake := &fakeChatHistoryReader{page: channel.HistoryPage{ChannelType: "slack"}}
+	withSlackHistory(t, fake)
+
+	req := newRequest("GET", "/api/chat/history", nil)
+	req.Header.Set("X-Task-ID", taskID) // forged: no X-Actor-Source=task_token
+	w := httptest.NewRecorder()
+	testHandler.GetChatChannelHistory(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+	if fake.gotSession.Valid {
+		t.Fatalf("reader must not be called for a forged X-Task-ID")
+	}
+}
+
 func TestGetChatChannelHistory_MissingTaskHeader(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("requires test database")
 	}
+	// Task-token actor source but no X-Task-ID: a defensive 400 (the mat_ branch
+	// always stamps both, so this should not happen in practice).
 	req := newRequest("GET", "/api/chat/history", nil)
+	req.Header.Set("X-Actor-Source", "task_token")
 	w := httptest.NewRecorder()
 	testHandler.GetChatChannelHistory(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -153,10 +188,8 @@ func TestGetChatChannelHistory_NonChatTask(t *testing.T) {
 	taskID := newChatHistoryTask(t, false) // task with no chat_session_id
 	withSlackHistory(t, &fakeChatHistoryReader{})
 
-	req := newRequest("GET", "/api/chat/history", nil)
-	req.Header.Set("X-Task-ID", taskID)
 	w := httptest.NewRecorder()
-	testHandler.GetChatChannelHistory(w, req)
+	testHandler.GetChatChannelHistory(w, taskActorRequest(taskID))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
 	}

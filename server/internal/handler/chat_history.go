@@ -43,9 +43,20 @@ type ChatChannelHistoryResponse struct {
 // history of THAT task's chat session — so an agent can only ever read the
 // conversation it is currently running for, never an arbitrary session/channel.
 func (h *Handler) GetChatChannelHistory(w http.ResponseWriter, r *http.Request) {
+	// X-Actor-Source is server-set only: the Auth middleware deletes any
+	// client-supplied value and re-stamps "task_token" ONLY on the mat_ task
+	// token branch (along with the authoritative X-Task-ID). A normal JWT / mul_
+	// PAT request leaves it empty and does NOT strip a client-forged X-Task-ID,
+	// so this gate is load-bearing: without it a member could forge X-Task-ID and
+	// read another session's channel history. Require the task-token actor here,
+	// THEN trust X-Task-ID.
+	if r.Header.Get("X-Actor-Source") != "task_token" {
+		writeError(w, http.StatusForbidden, "chat history is only available from within an agent task")
+		return
+	}
 	taskIDHeader := r.Header.Get("X-Task-ID")
 	if taskIDHeader == "" {
-		writeError(w, http.StatusBadRequest, "chat history is only available from within an agent task")
+		writeError(w, http.StatusBadRequest, "missing task context")
 		return
 	}
 	taskUUID, err := util.ParseUUID(taskIDHeader)
