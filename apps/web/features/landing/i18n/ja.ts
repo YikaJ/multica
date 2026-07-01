@@ -280,7 +280,6 @@ export function createJaDict(allowSignup: boolean): LandingDict {
             "Slack チャンネルの文脈読み込みが 2 つのコマンドに整理されました：チャンネル概要と、特定スレッドの読み取りです。",
             "ByteDance TRAE CLI（traecli）が標準 ACP プロトコル経由で組み込みエージェント ランタイムに加わりました。",
             "Anthropic のモデル一覧に Claude Sonnet 5 を追加し、導入期価格を反映しました。",
-            "セルフホスト環境でも、オンボーディングまたはソース補完ダイアログから匿名で「Multica をどこで知ったか」を回答できるようになりました。",
             "タスクの各実行で prompt cache のヒット率が使用量ログに記録されるようになりました。",
           ],
           improvements: [

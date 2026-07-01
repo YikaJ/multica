@@ -304,7 +304,6 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Slack channel context is now driven by two focused reads: a channel overview and a per-thread read.",
           "ByteDance TRAE CLI (traecli) joins the built-in agent runtimes over the standard ACP transport.",
           "Claude Sonnet 5 is now available in the Anthropic model catalog with introductory pricing.",
-          "Self-hosted deployments can now report their anonymous source channel from onboarding or the backfill dialog.",
           "Each task run records a prompt-cache hit ratio in the usage log.",
         ],
         improvements: [

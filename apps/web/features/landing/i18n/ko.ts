@@ -279,7 +279,6 @@ export function createKoDict(allowSignup: boolean): LandingDict {
             "Slack 채널 문맥 읽기가 두 개의 명령으로 정리되었습니다: 채널 개요와 단일 스레드 읽기입니다.",
             "ByteDance TRAE CLI(traecli)가 표준 ACP 프로토콜을 통해 내장 에이전트 런타임에 추가되었습니다.",
             "Anthropic 모델 목록에 Claude Sonnet 5가 추가되고 도입기 가격이 반영되었습니다.",
-            "셀프호스트 배포에서도 온보딩 또는 소스 보완 대화상자를 통해 «Multica를 어디서 알게 되었는지»를 익명으로 보고할 수 있습니다.",
             "각 태스크 실행에서 프롬프트 캐시 히트율이 사용량 로그에 기록됩니다.",
           ],
           improvements: [

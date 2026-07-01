@@ -304,7 +304,6 @@ export function createZhDict(allowSignup: boolean): LandingDict {
           "Slack 频道场景的上下文阅读拆成两条命令：一条查看频道概览，一条精读单个线程。",
           "字节跳动 TRAE CLI（traecli）通过标准 ACP 协议接入为内置智能体运行时之一。",
           "Anthropic 模型清单接入 Claude Sonnet 5，并已挂上介绍期价格。",
-          "自托管部署现可在初始化引导或来源补录弹窗中匿名回报「你是从哪里听说 Multica 的」。",
           "每次任务运行都会在用量日志里记录本次的 prompt cache 命中率。",
         ],
         improvements: [
