@@ -8,7 +8,7 @@ import type { UpdateIssueRequest } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useAuthStore } from "@multica/core/auth";
 import { useQuery } from "@tanstack/react-query";
-import { filterIssues } from "../../issues/utils/filter";
+import { filterIssues, filterAssigneeGroups } from "../../issues/utils/filter";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -126,6 +126,18 @@ export function MyIssuesPage() {
   const loading = usesAssigneeBoard
     ? assigneeGroupsQuery.isLoading
     : statusIssuesQuery.isLoading;
+
+  // Assignee-grouped board renders from `groups`, bypassing the flat
+  // `filterIssues` output, so re-apply the client-only "Show sub-issues"
+  // toggle here (see filterAssigneeGroups).
+  const filteredAssigneeGroups = useMemo(
+    () => filterAssigneeGroups(assigneeGroupsQuery.data?.groups, { showSubIssues }),
+    [assigneeGroupsQuery.data, showSubIssues],
+  );
+  const filteredAssigneeIssues = useMemo(
+    () => filteredAssigneeGroups?.flatMap((group) => group.issues) ?? [],
+    [filteredAssigneeGroups],
+  );
 
   // Apply status/priority/agent-running filters from view store
   const issues = useMemo(
@@ -268,8 +280,8 @@ export function MyIssuesPage() {
           <div className="flex flex-col flex-1 min-h-0">
             {viewMode === "board" ? (
               <BoardView
-                issues={usesAssigneeBoard ? myIssues : issues}
-                assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
+                issues={usesAssigneeBoard ? filteredAssigneeIssues : issues}
+                assigneeGroups={usesAssigneeBoard ? filteredAssigneeGroups : undefined}
                 assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
                 assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
                 visibleStatuses={visibleStatuses}

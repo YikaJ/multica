@@ -34,9 +34,8 @@ import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } f
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
-import { filterIssues } from "../../issues/utils/filter";
+import { filterIssues, filterAssigneeGroups } from "../../issues/utils/filter";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
-import { filterRunningAssigneeGroups } from "./project-issue-filters";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
@@ -201,8 +200,8 @@ function ProjectIssuesContent({
   );
 
   const filteredAssigneeGroups = useMemo(
-    () => filterRunningAssigneeGroups(assigneeGroups, agentRunningFilter, runningIssueIds),
-    [assigneeGroups, agentRunningFilter, runningIssueIds],
+    () => filterAssigneeGroups(assigneeGroups, { showSubIssues, agentRunningFilter, runningIssueIds }),
+    [assigneeGroups, showSubIssues, agentRunningFilter, runningIssueIds],
   );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));

@@ -10,7 +10,7 @@ import { useIssueViewStore, useClearFiltersOnWorkspaceChange, type IssueDateFilt
 import { dateOnlyToLocalDate } from "@multica/core/issues/date";
 import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
-import { filterIssues } from "../utils/filter";
+import { filterIssues, filterAssigneeGroups } from "../utils/filter";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueAssigneeGroupsOptions, issueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter } from "@multica/core/issues/queries";
@@ -133,6 +133,17 @@ export function IssuesPage() {
   const assigneeIssues = useMemo(
     () => assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [],
     [assigneeGroupsQuery.data],
+  );
+  // Assignee-grouped board renders from `groups`, bypassing the flat
+  // `filterIssues` output, so re-apply the client-only "Show sub-issues"
+  // toggle here (see filterAssigneeGroups).
+  const filteredAssigneeGroups = useMemo(
+    () => filterAssigneeGroups(assigneeGroupsQuery.data?.groups, { showSubIssues }),
+    [assigneeGroupsQuery.data, showSubIssues],
+  );
+  const filteredAssigneeIssues = useMemo(
+    () => filteredAssigneeGroups?.flatMap((group) => group.issues) ?? [],
+    [filteredAssigneeGroups],
   );
   const loading = usesAssigneeBoard
     ? assigneeGroupsQuery.isLoading
@@ -265,8 +276,8 @@ export function IssuesPage() {
           <div className="flex flex-col flex-1 min-h-0">
             {viewMode === "board" ? (
               <BoardView
-                issues={usesAssigneeBoard ? assigneeIssues : issues}
-                assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
+                issues={usesAssigneeBoard ? filteredAssigneeIssues : issues}
+                assigneeGroups={usesAssigneeBoard ? filteredAssigneeGroups : undefined}
                 assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
                 assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
                 visibleStatuses={visibleStatuses}

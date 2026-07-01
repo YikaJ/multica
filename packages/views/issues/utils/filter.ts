@@ -1,4 +1,4 @@
-import type { Issue, IssueStatus, IssuePriority } from "@multica/core/types";
+import type { Issue, IssueAssigneeGroup, IssueStatus, IssuePriority } from "@multica/core/types";
 import type { ActorFilterValue } from "@multica/core/issues/stores/view-store";
 
 export interface IssueFilters {
@@ -99,4 +99,45 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
 
     return true;
   });
+}
+
+/**
+ * Apply the client-only display filters to assignee-grouped board data.
+ *
+ * The assignee-grouped board renders from the server-provided `groups` array
+ * rather than the flat `filterIssues` output, so display toggles that live
+ * purely on the client — "Show sub-issues" and the "agents working" quick
+ * filter — must be re-applied here or they silently bypass the assignee board.
+ * Only these two are handled: everything else (status, priority, label, …) is
+ * already enforced server-side when the groups are fetched, and re-running it
+ * here could double-filter against stale query params.
+ *
+ * Filtered groups get their `total` recomputed and emptied groups dropped. When
+ * neither toggle is active the original array is returned by reference so
+ * callers don't churn renders.
+ */
+export function filterAssigneeGroups(
+  groups: IssueAssigneeGroup[] | undefined,
+  filters: {
+    showSubIssues?: boolean;
+    agentRunningFilter?: boolean;
+    runningIssueIds?: ReadonlySet<string>;
+  },
+): IssueAssigneeGroup[] | undefined {
+  const applyRunning = filters.agentRunningFilter === true;
+  const hideSubIssues = filters.showSubIssues === false;
+  if (!groups || (!applyRunning && !hideSubIssues)) return groups;
+
+  const { runningIssueIds } = filters;
+  return groups
+    .map((group) => {
+      const issues = group.issues.filter((issue) => {
+        if (applyRunning && !(runningIssueIds?.has(issue.id) ?? false))
+          return false;
+        if (hideSubIssues && issue.parent_issue_id) return false;
+        return true;
+      });
+      return { ...group, issues, total: issues.length };
+    })
+    .filter((group) => group.issues.length > 0);
 }
