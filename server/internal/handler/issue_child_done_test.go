@@ -450,9 +450,10 @@ func TestChildDoneTriggersParentAgentWhenSameAgentOwnsChild(t *testing.T) {
 // whose leader is also agent A. Because the parent is an AGENT, dispatch
 // routes through the agent path, which (post-MUL-2808) has no self-trigger
 // guard: A coordinates the parent and must be woken to advance it when the
-// child completes, regardless of who executed the child. The genuinely
-// loop-prone case — BOTH sides squads sharing a leader — is still guarded on
-// the squad path (see TestChildDoneSelfTriggerGuard_SquadParentDifferentSquadSameLeader).
+// child completes, regardless of who executed the child. The squad path now
+// behaves identically: MUL-3969 removed its old same-squad / shared-leader
+// guards, so BOTH sides being squads that share a leader also wakes the leader
+// (see TestChildDoneWakesLeaderWhenParentAndChildSquadsShareLeader).
 func TestChildDoneTriggersParentAgentWhenChildSquadSharesLeader(t *testing.T) {
 	fx := newChildDoneFixture(t, "in_progress")
 	sq := newSquadCommentTriggerFixture(t)
