@@ -19,8 +19,10 @@ import {
   issueKeys,
   type IssueSortParam,
 } from "./queries";
+import { inboxKeys } from "../inbox/queries";
 import type {
   GroupedIssuesResponse,
+  InboxItem,
   Issue,
   ListIssuesCache,
   ListIssuesParams,
@@ -59,6 +61,32 @@ function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
     metadata: {},
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeInboxItem(
+  id: string,
+  issueId: string,
+  overrides: Partial<InboxItem> = {},
+): InboxItem {
+  return {
+    id,
+    workspace_id: WS_ID,
+    recipient_type: "member",
+    recipient_id: "user-1",
+    actor_type: "member",
+    actor_id: "user-2",
+    type: "status_changed",
+    severity: "info",
+    issue_id: issueId,
+    title: `Inbox ${id}`,
+    body: null,
+    issue_status: "todo",
+    read: false,
+    archived: false,
+    created_at: "2025-01-01T00:00:00Z",
+    details: null,
     ...overrides,
   };
 }
@@ -366,6 +394,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
   const projectScope = "project:p1";
   const projectFilter = { project_id: "p1" };
   const wsKey = issueKeys.listSorted(WS_ID, sort);
+  const inboxKey = inboxKeys.list(WS_ID);
   // My-Issues AND the Project board both ride this myList cache; a move that
   // only patched the workspace cache snaps back on those boards.
   const myKey = issueKeys.myListSorted(WS_ID, myScope, myFilter, sort);
@@ -391,6 +420,12 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     return (c?.byStatus[status]?.issues ?? []).map((i) => i.id);
   }
 
+  function inboxStatus(issueId: string) {
+    return qc
+      .getQueryData<InboxItem[]>(inboxKey)
+      ?.find((item) => item.issue_id === issueId)?.issue_status;
+  }
+
   beforeEach(() => {
     qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     updateIssue = vi.fn();
@@ -398,6 +433,10 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     qc.setQueryData<ListIssuesCache>(wsKey, makeBucketed());
     qc.setQueryData<ListIssuesCache>(myKey, makeBucketed());
     qc.setQueryData<ListIssuesCache>(projectKey, makeBucketed());
+    qc.setQueryData<InboxItem[]>(inboxKey, [
+      makeInboxItem("inbox-1", "issue-1"),
+      makeInboxItem("inbox-2", "issue-2"),
+    ]);
   });
 
   afterEach(() => {
@@ -437,6 +476,33 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     }
   });
 
+  it("optimistically patches the linked inbox row status and reconciles with the server response", async () => {
+    let resolve!: (issue: Issue) => void;
+    updateIssue.mockReturnValue(
+      new Promise<Issue>((r) => {
+        resolve = r;
+      }),
+    );
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({ id: "issue-1", status: "in_progress" });
+    });
+
+    expect(inboxStatus("issue-1")).toBe("in_progress");
+    expect(inboxStatus("issue-2")).toBe("todo");
+
+    await act(async () => {
+      resolve(makeIssue(1, { status: "done" }));
+    });
+
+    expect(inboxStatus("issue-1")).toBe("done");
+    expect(inboxStatus("issue-2")).toBe("todo");
+  });
+
   it("rolls both caches back when the request fails", async () => {
     updateIssue.mockRejectedValue(new Error("boom"));
 
@@ -454,6 +520,23 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
       expect(bucketIds(key, "todo")).toEqual(["issue-1"]);
       expect(bucketIds(key, "in_progress")).toEqual([]);
     }
+  });
+
+  it("rolls the linked inbox row status back when the request fails", async () => {
+    updateIssue.mockRejectedValue(new Error("boom"));
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current
+        .mutateAsync({ id: "issue-1", status: "in_progress" })
+        .catch(() => {});
+    });
+
+    expect(inboxStatus("issue-1")).toBe("todo");
+    expect(inboxStatus("issue-2")).toBe("todo");
   });
 
   it("does not invalidate the board list on settle (no refetch flicker)", async () => {
@@ -474,24 +557,57 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
   });
 
-  it("invalidates myAll on settle when project_id changes (drops the issue from the old project's list)", async () => {
-    // A project move makes the issue leave the old project's filtered list. The
-    // surgical patch is filter-blind (it never removes a card that no longer
-    // matches the list filter), so onSettled must refetch myAll to drop it —
-    // unlike a status-only move, which deliberately does not (MUL-3669 / #4548).
-    updateIssue.mockResolvedValue(makeIssue(1, { project_id: "project-9" }));
+  it("surgically removes the issue from the old project's list on a project move (no blanket myAll refetch)", async () => {
+    // A project move makes the issue leave the old project's filtered list.
+    // The membership-aware coordinator removes the card from that loaded list
+    // in onMutate — deterministic, no WS echo or refetch needed — replacing
+    // the old blanket "invalidate myAll on settle" safety net (MUL-3669 /
+    // #4548). Lists whose filter the move cannot affect stay untouched.
+    let resolve!: (issue: Issue) => void;
+    updateIssue.mockReturnValue(
+      new Promise<Issue>((r) => {
+        resolve = r;
+      }),
+    );
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
 
     const { result } = renderHook(() => useUpdateIssue(), {
       wrapper: createWrapper(qc),
     });
 
-    await act(async () => {
-      await result.current.mutateAsync({ id: "issue-1", project_id: "project-9" });
+    act(() => {
+      result.current.mutate({ id: "issue-1", project_id: "project-9" });
     });
 
+    // Optimistic: gone from the old project's list immediately; the
+    // workspace board and the assignee-filtered list keep the card.
+    expect(bucketIds(projectKey, "todo")).toEqual([]);
+    expect(bucketIds(wsKey, "todo")).toEqual(["issue-1"]);
+    expect(bucketIds(myKey, "todo")).toEqual(["issue-1"]);
+
+    await act(async () => {
+      resolve(makeIssue(1, { project_id: "project-9" }));
+    });
+
+    expect(bucketIds(projectKey, "todo")).toEqual([]);
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
-    expect(invalidatedKeys).toContainEqual(issueKeys.myAll(WS_ID));
+    expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
+  });
+
+  it("rolls the membership removal back when a project move fails", async () => {
+    updateIssue.mockRejectedValue(new Error("boom"));
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current
+        .mutateAsync({ id: "issue-1", project_id: "project-9" })
+        .catch(() => {});
+    });
+
+    expect(bucketIds(projectKey, "todo")).toEqual(["issue-1"]);
   });
 });
 
@@ -695,10 +811,14 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     expect(invalidatedKeys).not.toContainEqual(issueKeys.list(WS_ID));
   });
 
-  it("invalidates myAll on settle when project_id changes (drops moved issues from the old project's list)", async () => {
-    // Mirrors useUpdateIssue: a batch that moves issues between projects must
-    // refetch myAll so they leave the old project's filtered list, even though a
-    // status-only batch deliberately does not (MUL-3669 / #4548).
+  it("surgically removes moved issues from the old project's list (no blanket myAll refetch)", async () => {
+    // Mirrors useUpdateIssue: a batch project move drops the cards from the
+    // old project's loaded list via the membership-aware coordinator instead
+    // of refetching every filtered list (MUL-3669 / #4548).
+    const projectScope = "project:p1";
+    const projectFilter = { project_id: "p1" };
+    const projectKey = issueKeys.myListSorted(WS_ID, projectScope, projectFilter, sort);
+    qc.setQueryData<ListIssuesCache>(projectKey, makeBucketed());
     batchUpdateIssues.mockResolvedValue({ updated: 1 });
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
 
@@ -713,8 +833,11 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
       });
     });
 
+    expect(bucketIds(projectKey, "todo")).toEqual([]);
+    // The assignee-filtered list is untouched by a project move.
+    expect(bucketIds(myKey, "todo")).toEqual(["issue-1"]);
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
-    expect(invalidatedKeys).toContainEqual(issueKeys.myAll(WS_ID));
+    expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
   });
 });
 
