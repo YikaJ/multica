@@ -5,10 +5,11 @@ import { ListTodo, Plus } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { getIssueSurfaceViewStore } from "@multica/core/issues/stores/surface-view-store";
 import { issueScopeKey } from "@multica/core/issues/surface/scope";
-import type { CreateIssueRequest, Issue } from "@multica/core/types";
+import type { Issue } from "@multica/core/types";
 import { BoardView } from "../components/board-view";
 import { BatchActionToolbar } from "../components/batch-action-toolbar";
 import { GanttView } from "../components/gantt-view";
@@ -18,7 +19,7 @@ import { SwimLaneView } from "../components/swimlane-view";
 import { useT } from "../../i18n";
 import { IssueSurfaceActionsProvider } from "./actions-context";
 import { IssueSurfaceSelectionProvider } from "./selection-context";
-import type { IssueSurfaceProps } from "./types";
+import type { IssueCreateDefaults, IssueSurfaceProps } from "./types";
 import {
   useIssueSurfaceController,
   type IssueSurfaceController,
@@ -52,6 +53,7 @@ export function IssueSurface({
   batchToolbar = "always",
   contentClassName,
 }: IssueSurfaceComponentProps) {
+  const wsId = useWorkspaceId();
   const resolvedSurfaceKey = surfaceKey ?? issueScopeKey(scope);
   const store = useMemo(
     () => getIssueSurfaceViewStore(resolvedSurfaceKey),
@@ -60,7 +62,19 @@ export function IssueSurface({
 
   return (
     <ViewStoreProvider store={store}>
+      {/* Remount on data-window change: the list queries keep the previous
+          key's data as a placeholder (keepPreviousData) so sort/filter
+          changes within ONE surface never flash a skeleton — but reusing the
+          mounted observer across windows made project A's cards impersonate
+          project B (with isLoading=false, so no skeleton either) until B's
+          fetch landed. A window-keyed remount gives the new window a fresh
+          observer: cold window → skeleton, warm window → instant cache hit.
+          The window identity is wsId + scope — wsId is required because the
+          workspace layout does not remount on workspace switch and two
+          workspaces share the same scope key (e.g. "workspace:all"). Keyed
+          by data identity, not surfaceKey (view-preference identity). */}
       <IssueSurfaceContent
+        key={`${wsId}:${issueScopeKey(scope)}`}
         scope={scope}
         modes={modes}
         createDefaults={createDefaults}
@@ -113,8 +127,8 @@ function IssueSurfaceContent({
     [controller, issues],
   );
   const openCreateIssue = useCallback(
-    (defaults?: Record<string, unknown>) => {
-      controller.openCreateIssue(defaults as Partial<CreateIssueRequest>);
+    (defaults?: IssueCreateDefaults) => {
+      controller.openCreateIssue(defaults);
     },
     [controller],
   );
@@ -178,6 +192,7 @@ function IssueSurfaceContent({
                 hiddenStatuses={controller.hiddenStatuses}
                 onMoveIssue={controller.moveIssue}
                 childProgressMap={controller.childProgressMap}
+                projectMap={controller.projectMap}
                 myIssuesScope={controller.loadMoreScope}
                 myIssuesFilter={controller.loadMoreFilter}
                 sort={controller.sort}
@@ -190,6 +205,7 @@ function IssueSurfaceContent({
                 issues={issues}
                 visibleStatuses={controller.visibleStatuses}
                 childProgressMap={controller.childProgressMap}
+                projectMap={controller.projectMap}
                 myIssuesScope={controller.loadMoreScope}
                 myIssuesFilter={controller.loadMoreFilter}
                 sort={controller.sort}
@@ -210,6 +226,7 @@ function IssueSurfaceContent({
                 hiddenStatuses={controller.hiddenStatuses}
                 onMoveIssue={controller.moveIssue}
                 childProgressMap={controller.childProgressMap}
+                projectMap={controller.projectMap}
                 myIssuesScope={controller.loadMoreScope}
                 myIssuesFilter={controller.loadMoreFilter}
                 sort={controller.sort}

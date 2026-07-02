@@ -13,7 +13,12 @@ import {
 } from "@dnd-kit/core";
 import type { QueryKey } from "@tanstack/react-query";
 import { arrayMove } from "@dnd-kit/sortable";
-import type { Issue, IssueAssigneeGroup, IssueStatus } from "@multica/core/types";
+import type {
+  Issue,
+  IssueAssigneeGroup,
+  IssueStatus,
+  Project,
+} from "@multica/core/types";
 import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { AssigneeGroupedIssuesFilter, IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
@@ -24,6 +29,7 @@ import { BoardCardContent } from "./board-card";
 import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import type { ChildProgress } from "./list-row";
+import type { IssueCreateDefaults } from "../surface/types";
 import { useDragSettle } from "./use-drag-settle";
 import { useT } from "../../i18n";
 import {
@@ -119,6 +125,7 @@ export function BoardView({
   hiddenStatuses,
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
+  projectMap,
   myIssuesScope,
   myIssuesFilter,
   sort,
@@ -133,6 +140,7 @@ export function BoardView({
   hiddenStatuses: IssueStatus[];
   onMoveIssue: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
   childProgressMap?: Map<string, ChildProgress>;
+  projectMap?: Map<string, Project>;
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
@@ -140,7 +148,7 @@ export function BoardView({
   sort?: IssueSortParam;
   /** When set, the per-column "+" pre-fills the project on the create form. */
   projectId?: string;
-  onCreateIssue?: (defaults: Record<string, unknown>) => void;
+  onCreateIssue?: (defaults: IssueCreateDefaults) => void;
 }) {
   const { t } = useT("issues");
   const grouping = useViewStore((s) => s.grouping);
@@ -420,6 +428,7 @@ export function BoardView({
                 issueIds={columns[group.id] ?? EMPTY_IDS}
                 issueMap={issueMapRef.current}
                 childProgressMap={childProgressMap}
+                projectMap={projectMap}
                 myIssuesOpts={myIssuesOpts}
                 sort={sort}
                 projectId={projectId}
@@ -434,6 +443,7 @@ export function BoardView({
                   issueIds={columns[group.id] ?? EMPTY_IDS}
                   issueMap={issueMapRef.current}
                   childProgressMap={childProgressMap}
+                  projectMap={projectMap}
                   queryKey={assigneeGroupQueryKey}
                   filter={assigneeGroupFilter}
                   sort={sort}
@@ -448,6 +458,7 @@ export function BoardView({
                   issueIds={columns[group.id] ?? EMPTY_IDS}
                   issueMap={issueMapRef.current}
                   childProgressMap={childProgressMap}
+                  projectMap={projectMap}
                   projectId={projectId}
                   onCreateIssue={onCreateIssue}
                   totalCount={group.totalCount}
@@ -470,7 +481,15 @@ export function BoardView({
       <DragOverlay dropAnimation={null}>
         {activeIssue ? (
           <div style={{ width: BOARD_CARD_WIDTH }} className="rotate-1 cursor-grabbing opacity-90 shadow-lg shadow-black/10">
-            <BoardCardContent issue={activeIssue} childProgress={childProgressMap.get(activeIssue.id)} />
+            <BoardCardContent
+              issue={activeIssue}
+              childProgress={childProgressMap.get(activeIssue.id)}
+              project={
+                activeIssue.project_id
+                  ? projectMap?.get(activeIssue.project_id)
+                  : undefined
+              }
+            />
           </div>
         ) : null}
       </DragOverlay>
@@ -483,6 +502,7 @@ const PaginatedAssigneeBoardColumn = memo(function PaginatedAssigneeBoardColumn(
   issueIds,
   issueMap,
   childProgressMap,
+  projectMap,
   queryKey,
   filter,
   sort,
@@ -494,11 +514,12 @@ const PaginatedAssigneeBoardColumn = memo(function PaginatedAssigneeBoardColumn(
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
+  projectMap?: Map<string, Project>;
   queryKey: QueryKey;
   filter: AssigneeGroupedIssuesFilter;
   sort?: IssueSortParam;
   projectId?: string;
-  onCreateIssue?: (defaults: Record<string, unknown>) => void;
+  onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   sortLabel?: string | null;
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByAssigneeGroup(
@@ -517,6 +538,7 @@ const PaginatedAssigneeBoardColumn = memo(function PaginatedAssigneeBoardColumn(
       issueIds={issueIds}
       issueMap={issueMap}
       childProgressMap={childProgressMap}
+      projectMap={projectMap}
       totalCount={total}
       projectId={projectId}
       onCreateIssue={onCreateIssue}
@@ -535,6 +557,7 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
   issueIds,
   issueMap,
   childProgressMap,
+  projectMap,
   myIssuesOpts,
   sort,
   projectId,
@@ -545,10 +568,11 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
+  projectMap?: Map<string, Project>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
   sort?: IssueSortParam;
   projectId?: string;
-  onCreateIssue?: (defaults: Record<string, unknown>) => void;
+  onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   sortLabel?: string | null;
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
@@ -562,6 +586,7 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
       issueIds={issueIds}
       issueMap={issueMap}
       childProgressMap={childProgressMap}
+      projectMap={projectMap}
       totalCount={total}
       projectId={projectId}
       onCreateIssue={onCreateIssue}

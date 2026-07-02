@@ -78,6 +78,7 @@ describe("useIssueSurfaceController", () => {
     setApiInstance({
       listIssues,
       listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
       getChildIssueProgress: vi.fn(() => never()),
     } as unknown as ApiClient);
@@ -329,13 +330,13 @@ describe("useIssueSurfaceController", () => {
     act(() => {
       result.current.moveIssue(
         "issue-1",
-        { status: "in_progress", position: 42 },
+        { status: "in_progress", position: 42, project_id: "p2" },
         onSettled,
       );
     });
 
     expect(updateIssueMutate).toHaveBeenCalledWith(
-      { id: "issue-1", status: "in_progress", position: 42 },
+      { id: "issue-1", status: "in_progress", position: 42, project_id: "p2" },
       expect.objectContaining({
         onError: expect.any(Function),
         onSettled: expect.any(Function),
@@ -374,5 +375,43 @@ describe("useIssueSurfaceController", () => {
       updates: { status: "done" },
     });
     expect(batchDeleteMutateAsync).toHaveBeenCalledWith(["issue-2"]);
+  });
+
+  it("never reports isEmpty in gantt mode — an empty scheduled subset cannot prove the window is empty", async () => {
+    // The gantt query returns only issues with a start/due date. A project
+    // full of unscheduled issues comes back [] here, and the surface used to
+    // conclude "no issues linked" and render the generic create-issue empty
+    // state over GanttView's accurate "no scheduled issues" one.
+    listIssues.mockResolvedValue({ issues: [], total: 0 });
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["gantt"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.viewMode).toBe("gantt");
+    // Falls through to GanttView, which renders its own scheduled-empty copy.
+    expect(result.current.isEmpty).toBe(false);
+  });
+
+  it("still reports isEmpty for the full-window modes when the list is empty", async () => {
+    listIssues.mockResolvedValue({ issues: [], total: 0 });
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["list"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.isEmpty).toBe(true);
   });
 });

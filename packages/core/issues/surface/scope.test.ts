@@ -2,10 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   UnsupportedIssueScopeError,
   issueScopeKey,
-  issueScopeToApiParams,
-  issueScopeToCreateDefaults,
-  issueScopeToGroupedApiParams,
 } from "./scope";
+import { buildIssueSurfaceQueryPlan } from "./query-plan";
 
 describe("issue surface scope", () => {
   it("builds stable surface keys", () => {
@@ -30,94 +28,126 @@ describe("issue surface scope", () => {
     expect(issueScopeKey({ type: "team", teamId: "t1" })).toBe("team:t1");
   });
 
-  it("maps supported list API params without changing API shape", () => {
-    expect(issueScopeToApiParams({ type: "workspace" })).toEqual({});
+  it("builds the workspace query plan", () => {
+    // The unfiltered tab shares the workspace list cache.
+    expect(buildIssueSurfaceQueryPlan({ type: "workspace" })).toMatchObject({
+      kind: "workspace",
+      scopeKey: "workspace:all",
+      queryFilter: {},
+      groupedScopeFilter: {},
+      createDefaults: {},
+    });
+
+    // Members/Agents tabs are server-filtered scoped lists: assignee_types
+    // rides the list + grouped requests, and each tab owns its cache entry
+    // (correct totals + load-more, no client post-filtering).
     expect(
-      issueScopeToApiParams({
+      buildIssueSurfaceQueryPlan({ type: "workspace", actorKind: "agents" }),
+    ).toMatchObject({
+      kind: "scoped",
+      scopeKey: "workspace:agents",
+      queryScope: "workspace:agents",
+      queryFilter: { assignee_types: ["agent", "squad"] },
+      groupedScopeFilter: { assignee_types: ["agent", "squad"] },
+      loadMoreScope: "workspace:agents",
+      loadMoreFilter: { assignee_types: ["agent", "squad"] },
+      createDefaults: {},
+    });
+    expect(
+      buildIssueSurfaceQueryPlan({ type: "workspace", actorKind: "members" }),
+    ).toMatchObject({
+      kind: "scoped",
+      scopeKey: "workspace:members",
+      queryFilter: { assignee_types: ["member"] },
+      groupedScopeFilter: { assignee_types: ["member"] },
+      createDefaults: {},
+    });
+  });
+
+  it("builds personal issue query plans using the existing query contracts", () => {
+    expect(
+      buildIssueSurfaceQueryPlan({
         type: "my",
         relation: "assigned",
         userId: "u1",
       }),
-    ).toEqual({ assignee_id: "u1" });
+    ).toMatchObject({
+      scopeKey: "my:u1:assigned",
+      queryScope: "assigned",
+      queryFilter: { assignee_id: "u1" },
+      groupedScopeFilter: { assignee_id: "u1" },
+      loadMoreScope: "assigned",
+      loadMoreFilter: { assignee_id: "u1" },
+      userId: undefined,
+      createDefaults: { assignee_type: "member", assignee_id: "u1" },
+    });
     expect(
-      issueScopeToApiParams({ type: "my", relation: "created", userId: "u1" }),
-    ).toEqual({ creator_id: "u1" });
+      buildIssueSurfaceQueryPlan({
+        type: "my",
+        relation: "created",
+        userId: "u1",
+      }),
+    ).toMatchObject({
+      queryScope: "created",
+      queryFilter: { creator_id: "u1" },
+      createDefaults: {},
+    });
     expect(
-      issueScopeToApiParams({
+      buildIssueSurfaceQueryPlan({
         type: "my",
         relation: "involved",
         userId: "u1",
       }),
-    ).toEqual({ involves_user_id: "u1" });
-    expect(issueScopeToApiParams({ type: "project", projectId: "p1" })).toEqual(
-      { project_id: "p1" },
-    );
+    ).toMatchObject({
+      queryScope: "agents",
+      queryFilter: { involves_user_id: "u1" },
+      createDefaults: {},
+    });
     expect(
-      issueScopeToApiParams({
-        type: "actor",
-        actorType: "agent",
-        actorId: "a1",
-        relation: "assigned",
-      }),
-    ).toEqual({ assignee_id: "a1" });
-  });
-
-  it("maps grouped API params where the current endpoint can express them", () => {
-    expect(
-      issueScopeToGroupedApiParams({
-        type: "workspace",
-        actorKind: "members",
-      }),
-    ).toEqual({ group_by: "assignee", assignee_types: ["member"] });
-    expect(
-      issueScopeToGroupedApiParams({
-        type: "workspace",
-        actorKind: "agents",
-      }),
-    ).toEqual({ group_by: "assignee", assignee_types: ["agent", "squad"] });
-    expect(
-      issueScopeToGroupedApiParams({ type: "project", projectId: "p1" }),
-    ).toEqual({ group_by: "assignee", project_id: "p1" });
-  });
-
-  it("maps create defaults only for writable defaults", () => {
-    expect(
-      issueScopeToCreateDefaults({ type: "project", projectId: "p1" }),
-    ).toEqual({ project_id: "p1" });
-    expect(
-      issueScopeToCreateDefaults({
+      buildIssueSurfaceQueryPlan({
         type: "my",
-        relation: "assigned",
+        relation: "all",
         userId: "u1",
       }),
-    ).toEqual({ assignee_type: "member", assignee_id: "u1" });
+    ).toMatchObject({
+      queryScope: "all",
+      queryFilter: {},
+      groupedScopeFilter: {},
+      userId: "u1",
+      createDefaults: {},
+    });
+  });
+
+  it("builds project and actor query plans", () => {
     expect(
-      issueScopeToCreateDefaults({
+      buildIssueSurfaceQueryPlan({ type: "project", projectId: "p1" }),
+    ).toMatchObject({
+      scopeKey: "project:p1",
+      queryScope: "project:p1",
+      queryFilter: { project_id: "p1" },
+      groupedScopeFilter: { project_id: "p1" },
+      createDefaults: { project_id: "p1" },
+    });
+
+    expect(
+      buildIssueSurfaceQueryPlan({
         type: "actor",
         actorType: "agent",
         actorId: "a1",
         relation: "assigned",
       }),
-    ).toEqual({ assignee_type: "agent", assignee_id: "a1" });
-    expect(
-      issueScopeToCreateDefaults({
-        type: "actor",
-        actorType: "agent",
-        actorId: "a1",
-        relation: "created",
-      }),
-    ).toEqual({});
+    ).toMatchObject({
+      scopeKey: "actor:agent:a1:assigned",
+      queryScope: "actor:agent:a1:assigned",
+      queryFilter: { assignee_id: "a1" },
+      groupedScopeFilter: { assignee_id: "a1" },
+      createDefaults: { assignee_type: "agent", assignee_id: "a1" },
+    });
   });
 
   it("throws for team until the issue API has a team filter", () => {
     const scope = { type: "team" as const, teamId: "t1" };
-    expect(() => issueScopeToApiParams(scope)).toThrow(
-      UnsupportedIssueScopeError,
-    );
-    expect(() => issueScopeToGroupedApiParams(scope)).toThrow(
-      UnsupportedIssueScopeError,
-    );
-    expect(() => issueScopeToCreateDefaults(scope)).toThrow(
+    expect(() => buildIssueSurfaceQueryPlan(scope)).toThrow(
       UnsupportedIssueScopeError,
     );
   });

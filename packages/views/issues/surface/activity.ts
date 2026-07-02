@@ -5,7 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { AgentTask } from "@multica/core/types";
-import type { IssueScope } from "@multica/core/issues/surface/scope";
 
 export interface IssueActivityState {
   isWorking: boolean;
@@ -65,9 +64,7 @@ export function deriveIssueSurfaceActivity(
   return { activityByIssueId, runningIssueIds };
 }
 
-export function useIssueSurfaceActivity(
-  _scope: IssueScope,
-): IssueSurfaceActivity {
+export function useIssueSurfaceActivity(): IssueSurfaceActivity {
   const wsId = useWorkspaceId();
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
   return useMemo(() => deriveIssueSurfaceActivity(snapshot), [snapshot]);

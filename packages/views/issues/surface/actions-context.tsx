@@ -1,7 +1,8 @@
 "use client";
 
 import { createContext, useContext, type ReactNode } from "react";
-import type { CreateIssueRequest, UpdateIssueRequest } from "@multica/core/types";
+import type { UpdateIssueRequest } from "@multica/core/types";
+import type { IssueCreateDefaults } from "./types";
 
 export type IssueSurfaceMutationOptions = {
   errorMessage?: string;
@@ -12,7 +13,7 @@ export type IssueSurfaceMutationOptions = {
 
 export interface IssueSurfaceActions {
   isPending: boolean;
-  createIssue: (defaults?: Partial<CreateIssueRequest>) => void;
+  createIssue: (defaults?: IssueCreateDefaults) => void;
   updateIssue: (
     issueId: string,
     updates: Partial<UpdateIssueRequest>,

@@ -1,9 +1,4 @@
-import type {
-  CreateIssueRequest,
-  IssueAssigneeType,
-  ListGroupedIssuesParams,
-  ListIssuesParams,
-} from "../../types";
+import type { IssueAssigneeType } from "../../types";
 
 export type WorkspaceIssueActorKind = "all" | "members" | "agents";
 
@@ -42,91 +37,5 @@ export function issueScopeKey(scope: IssueScope): string {
       return `actor:${scope.actorType}:${scope.actorId}:${scope.relation}`;
     case "team":
       return `team:${scope.teamId}`;
-  }
-}
-
-export function issueScopeToApiParams(scope: IssueScope): ListIssuesParams {
-  switch (scope.type) {
-    case "workspace":
-      return {};
-    case "my":
-      switch (scope.relation) {
-        case "assigned":
-          return { assignee_id: scope.userId };
-        case "created":
-          return { creator_id: scope.userId };
-        case "involved":
-          return { involves_user_id: scope.userId };
-        case "all":
-          // The current API cannot express this OR query in one request.
-          // Callers keep using the existing union adapter keyed by scope.
-          return {};
-      }
-      break;
-    case "project":
-      return { project_id: scope.projectId };
-    case "actor":
-      return scope.relation === "assigned"
-        ? { assignee_id: scope.actorId }
-        : { creator_id: scope.actorId };
-    case "team":
-      throw new UnsupportedIssueScopeError(scope, "list API params");
-  }
-}
-
-export function issueScopeToGroupedApiParams(
-  scope: IssueScope,
-): ListGroupedIssuesParams {
-  const base: ListGroupedIssuesParams = { group_by: "assignee" };
-  switch (scope.type) {
-    case "workspace":
-      if (scope.actorKind === "members") {
-        return { ...base, assignee_types: ["member"] };
-      }
-      if (scope.actorKind === "agents") {
-        return { ...base, assignee_types: ["agent", "squad"] };
-      }
-      return base;
-    case "my":
-      switch (scope.relation) {
-        case "assigned":
-          return { ...base, assignee_id: scope.userId };
-        case "created":
-          return { ...base, creator_id: scope.userId };
-        case "involved":
-          return { ...base, involves_user_id: scope.userId };
-        case "all":
-          return base;
-      }
-      break;
-    case "project":
-      return { ...base, project_id: scope.projectId };
-    case "actor":
-      return scope.relation === "assigned"
-        ? { ...base, assignee_id: scope.actorId }
-        : { ...base, creator_id: scope.actorId };
-    case "team":
-      throw new UnsupportedIssueScopeError(scope, "grouped API params");
-  }
-}
-
-export function issueScopeToCreateDefaults(
-  scope: IssueScope,
-): Partial<CreateIssueRequest> {
-  switch (scope.type) {
-    case "workspace":
-      return {};
-    case "my":
-      return scope.relation === "assigned"
-        ? { assignee_type: "member", assignee_id: scope.userId }
-        : {};
-    case "project":
-      return { project_id: scope.projectId };
-    case "actor":
-      return scope.relation === "assigned"
-        ? { assignee_type: scope.actorType, assignee_id: scope.actorId }
-        : {};
-    case "team":
-      throw new UnsupportedIssueScopeError(scope, "create defaults");
   }
 }
