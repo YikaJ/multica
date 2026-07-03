@@ -2,6 +2,7 @@ import Mention from "@tiptap/extension-mention";
 import { mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import { MentionView } from "./mention-view";
+import { escapeMarkdownLabel } from "../utils/escape-markdown-label";
 
 const MENTION_LINK_MARKER = "](mention://";
 
@@ -90,8 +91,10 @@ export const BaseMentionExtension = Mention.extend({
         /^\[@?((?:\\.|[^\]\\])+)\]\(mention:\/\/(\w+)\/([^)]+)\)/,
       );
       if (!match) return undefined;
-      // Unescape backslash-escaped brackets that renderMarkdown may produce.
-      const rawLabel = match[1]?.replace(/\\\[/g, "[").replace(/\\\]/g, "]");
+      // Reverse escapeMarkdownLabel: unescape \[ \] \\ \( \) that
+      // renderMarkdown produced. Must mirror the escaped set exactly, or a
+      // label containing "\" fails to round-trip through the linear tokenizer.
+      const rawLabel = match[1]?.replace(/\\([[\]\\()])/g, "$1");
       return {
         type: "mention",
         raw: match[0],
@@ -105,9 +108,11 @@ export const BaseMentionExtension = Mention.extend({
   renderMarkdown: (node: any) => {
     const { id, label, type = "member" } = node.attrs || {};
     const prefix = type === "issue" || type === "project" ? "" : "@";
-    // Escape square brackets in the label so the markdown link syntax
-    // is not broken when the name contains [ or ] (e.g. "David[TF]").
-    const safeLabel = (label ?? id).replace(/\[/g, "\\[").replace(/\]/g, "\\]");
+    // Escape [ ] \ ( ) in the label so the markdown link syntax is not broken
+    // and the label survives the linear tokenizer (which now treats "\" as an
+    // escape lead, not an ordinary char). Must stay in sync with the unescape
+    // in tokenize() above. Shared with file-card/slash via escapeMarkdownLabel.
+    const safeLabel = escapeMarkdownLabel(label ?? id);
     return `[${prefix}${safeLabel}](mention://${type}/${id})`;
   },
 });

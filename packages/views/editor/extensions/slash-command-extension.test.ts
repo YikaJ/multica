@@ -79,6 +79,16 @@ describe("slash command tokenizer", () => {
     expect(tokenize(md)?.attributes.label).toBe("deploy[prod]");
   });
 
+  it.each(["A\\", "ends\\", "a\\]b", "f(x)", "back\\slash"])(
+    "round-trips a label containing backslash/parens: %j",
+    (label) => {
+      // renderMarkdown must escape "\" so a trailing "\" does not swallow the
+      // closing "]" under the linear tokenizer (regression guard).
+      const md = renderMarkdown({ attrs: { id: "skill-1", label } });
+      expect(tokenize(md)?.attributes.label).toBe(label);
+    },
+  );
+
   it("does not match ordinary markdown links", () => {
     expect(tokenize("[docs](https://example.com)")).toBeUndefined();
   });

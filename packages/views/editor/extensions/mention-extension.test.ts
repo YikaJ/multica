@@ -45,6 +45,23 @@ describe("mention tokenizer", () => {
     expect(token!.attributes.type).toBe("agent");
   });
 
+  it.each(["A\\", "ends\\", "a\\]b", "f(x)", "back\\slash"])(
+    "round-trips a label containing backslash/parens: %j",
+    (label) => {
+      // The linear tokenizer treats "\" as an escape lead, so renderMarkdown
+      // must escape "\" too — otherwise a trailing "\" swallows the closing "]"
+      // and the mention fails to parse back (regression guard for the
+      // de-ambiguation fix).
+      const md = renderMarkdown({
+        attrs: { id: "aaa-bbb", label, type: "member" },
+      });
+      const token = tokenize(md);
+      expect(token).toBeDefined();
+      expect(token!.attributes.label).toBe(label);
+      expect(token!.attributes.id).toBe("aaa-bbb");
+    },
+  );
+
   it("does not match an ordinary Markdown link before a mention", () => {
     const src =
       "Check [docs](https://example.com) - [@User](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)";

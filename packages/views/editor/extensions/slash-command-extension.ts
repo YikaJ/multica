@@ -3,6 +3,7 @@ import { mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import { SlashCommandView } from "./slash-command-view";
 import { formatSlashCommandLabel } from "./slash-command-utils";
+import { escapeMarkdownLabel } from "../utils/escape-markdown-label";
 
 export const SlashCommandExtension = Mention.extend({
   name: "slashCommand",
@@ -45,7 +46,10 @@ export const SlashCommandExtension = Mention.extend({
         /^\[\/((?:\\.|[^\]\\])+)\]\(slash:\/\/skill\/([^)]+)\)/,
       );
       if (!match) return undefined;
-      const rawLabel = match[1]?.replace(/\\\[/g, "[").replace(/\\\]/g, "]");
+      // Reverse escapeMarkdownLabel: unescape \[ \] \\ \( \). Must mirror the
+      // escaped set exactly, or a label containing "\" fails to round-trip
+      // through the linear tokenizer.
+      const rawLabel = match[1]?.replace(/\\([[\]\\()])/g, "$1");
       return {
         type: "slashCommand",
         raw: match[0],
@@ -60,9 +64,9 @@ export const SlashCommandExtension = Mention.extend({
 
   renderMarkdown: (node: any) => {
     const { id, label } = node.attrs || {};
-    const safeLabel = formatSlashCommandLabel(label)
-      .replace(/\[/g, "\\[")
-      .replace(/\]/g, "\\]");
+    // Escape [ ] \ ( ) so the label survives the linear tokenizer; must stay in
+    // sync with the unescape in tokenize() above.
+    const safeLabel = escapeMarkdownLabel(formatSlashCommandLabel(label));
     return `[/${safeLabel}](slash://skill/${id})`;
   },
 });
