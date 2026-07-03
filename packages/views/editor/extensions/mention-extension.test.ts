@@ -14,6 +14,9 @@ const renderMarkdown = BaseMentionExtension.config.renderMarkdown as (
   node: { attrs: Record<string, string> },
 ) => string;
 
+const JAVA_STACKTRACE_SOURCE_MARKER =
+  "        at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1006) \\~\\[spring-webmvc-5.3.39.jar!/:5.3.39\\]\n";
+
 function tokenize(src: string) {
   const start = startFn(src);
   if (start === -1) return undefined;
@@ -88,5 +91,30 @@ describe("mention tokenizer", () => {
     expect(token!.attributes.label).toBe("MUL-123");
     expect(token!.attributes.type).toBe("issue");
     expect(token!.attributes.id).toBe("aaa-bbb");
+  });
+
+  it("does not start at escaped Java stacktrace source markers before a real mention", () => {
+    const prefix = JAVA_STACKTRACE_SOURCE_MARKER.repeat(3);
+    const src = `${prefix}[@Alice](mention://member/aaa-bbb)`;
+
+    const start = startFn(src);
+    expect(start).toBe(prefix.length);
+
+    const token = tokenizeFn(src.slice(start));
+    expect(token).toBeDefined();
+    expect(token!.attributes.label).toBe("Alice");
+    expect(token!.attributes.type).toBe("member");
+    expect(token!.attributes.id).toBe("aaa-bbb");
+  });
+
+  it("keeps escaped Java stacktrace source marker detection fast when no mention exists", () => {
+    const src = JAVA_STACKTRACE_SOURCE_MARKER.repeat(11);
+
+    const t0 = performance.now();
+    const start = startFn(src);
+    const elapsed = performance.now() - t0;
+
+    expect(start).toBe(-1);
+    expect(elapsed).toBeLessThan(50);
   });
 });
