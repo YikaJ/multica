@@ -35,7 +35,11 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
 import { api } from "@multica/core/api";
-import { useTranscriptViewStore, type TranscriptSortDirection } from "@multica/core/agents/stores";
+import {
+  useTranscriptViewStore,
+  type TranscriptFilterKey,
+  type TranscriptSortDirection,
+} from "@multica/core/agents/stores";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
@@ -105,6 +109,12 @@ function getEventLabel(item: TimelineItem): string {
   }
 }
 
+function getItemFilterKey(item: TimelineItem): TranscriptFilterKey {
+  return item.tool && (item.type === "tool_use" || item.type === "tool_result")
+    ? `tool:${item.tool}`
+    : item.type;
+}
+
 function getEventSummary(item: TimelineItem): string {
   switch (item.type) {
     case "text":
@@ -140,6 +150,16 @@ function getEventSummary(item: TimelineItem): string {
     default:
       return "";
   }
+}
+
+function hasEventDetail(item: TimelineItem): boolean {
+  return (
+    (item.type === "tool_use" && !!item.input && Object.keys(item.input).length > 0) ||
+    (item.type === "tool_result" && !!item.output && item.output.length > 0) ||
+    (item.type === "thinking" && !!item.content && item.content.length > 0) ||
+    (item.type === "text" && !!item.content && item.content.length > 0) ||
+    (item.type === "error" && !!item.content && item.content.length > 0)
+  );
 }
 
 function shortenPath(p: string): string {
@@ -183,11 +203,24 @@ export function AgentTranscriptDialog({
   const [copiedWorkdir, setCopiedWorkdir] = useState(false);
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
-  const [selectedTools, setSelectedTools] = useState<Set<string>>(new Set());
+  const [sessionFilterKeys, setSessionFilterKeys] = useState<TranscriptFilterKey[]>([]);
+  const [expandedSeqs, setExpandedSeqs] = useState<Set<number>>(() => new Set());
   const sortDirection = useTranscriptViewStore((s) => s.sortDirection);
   const setSortDirection = useTranscriptViewStore((s) => s.setSortDirection);
+  const preserveFilters = useTranscriptViewStore((s) => s.preserveFilters);
+  const setPreserveFilters = useTranscriptViewStore((s) => s.setPreserveFilters);
+  const persistedFilterKeys = useTranscriptViewStore((s) => s.selectedFilterKeys);
+  const setPersistedFilterKeys = useTranscriptViewStore((s) => s.setSelectedFilterKeys);
+  const togglePersistedFilterKey = useTranscriptViewStore((s) => s.toggleFilterKey);
+  const clearPersistedFilterKeys = useTranscriptViewStore((s) => s.clearFilterKeys);
+  const defaultExpanded = useTranscriptViewStore((s) => s.defaultExpanded);
+  const setDefaultExpanded = useTranscriptViewStore((s) => s.setDefaultExpanded);
   const eventRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const autoExpandedSeqsRef = useRef<Set<number>>(new Set());
+  const initializedTaskRef = useRef<string | null>(null);
+  const previousDefaultExpandedRef = useRef(defaultExpanded);
+  const selectedFilterKeys = preserveFilters ? persistedFilterKeys : sessionFilterKeys;
 
   // Derive filter options from each item:
   //   tool_use / tool_result → filter value = tool, display = "tool:Bash"
@@ -195,30 +228,35 @@ export function AgentTranscriptDialog({
   const filterOptions = useMemo(() => {
     const options = new Map<string, string>();
     for (const item of items) {
+      const key = getItemFilterKey(item);
       if (item.tool && (item.type === "tool_use" || item.type === "tool_result")) {
-        const key = `tool:${item.tool}`;
         if (!options.has(key)) options.set(key, key);
       } else {
-        const value = item.type;
-        if (!options.has(value)) {
-          options.set(value, getEventLabel(item));
+        if (!options.has(key)) {
+          options.set(key, getEventLabel(item));
         }
       }
     }
     return Array.from(options.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   }, [items]);
 
-  // Resolve filter key for each item — mirrors filterOptions derivation exactly
-  const itemFilterKey = (item: TimelineItem) =>
-    item.tool && (item.type === "tool_use" || item.type === "tool_result")
-      ? `tool:${item.tool}`
-      : item.type;
+  const filterOptionKeys = useMemo(
+    () => new Set(filterOptions.map(([value]) => value)),
+    [filterOptions],
+  );
+
+  const activeFilterKeys = useMemo(
+    () => selectedFilterKeys.filter((key) => filterOptionKeys.has(key)),
+    [selectedFilterKeys, filterOptionKeys],
+  );
+
+  const activeFilterSet = useMemo(() => new Set(activeFilterKeys), [activeFilterKeys]);
 
   // Strict filter
   const filteredItems = useMemo(() => {
-    if (selectedTools.size === 0) return items;
-    return items.filter((item) => selectedTools.has(itemFilterKey(item)));
-  }, [items, selectedTools]);
+    if (activeFilterSet.size === 0) return items;
+    return items.filter((item) => activeFilterSet.has(getItemFilterKey(item)));
+  }, [items, activeFilterSet]);
 
   // Apply user-chosen sort direction. Reverse is a pure presentation concern —
   // the underlying timeline (and its seq numbers) is untouched, so copy/filter
@@ -227,6 +265,37 @@ export function AgentTranscriptDialog({
     () => (sortDirection === "newest_first" ? [...filteredItems].reverse() : filteredItems),
     [filteredItems, sortDirection],
   );
+
+  const detailSeqs = useMemo(
+    () => displayItems.filter(hasEventDetail).map((item) => item.seq),
+    [displayItems],
+  );
+
+  const allVisibleDetailsExpanded =
+    detailSeqs.length > 0 && detailSeqs.every((seq) => expandedSeqs.has(seq));
+
+  useEffect(() => {
+    const switchedDefaultOn =
+      defaultExpanded && previousDefaultExpandedRef.current !== defaultExpanded;
+    previousDefaultExpandedRef.current = defaultExpanded;
+
+    if (initializedTaskRef.current !== task.id || switchedDefaultOn) {
+      initializedTaskRef.current = task.id;
+      autoExpandedSeqsRef.current = new Set(defaultExpanded ? detailSeqs : []);
+      setExpandedSeqs(defaultExpanded ? new Set(detailSeqs) : new Set());
+      return;
+    }
+
+    if (!defaultExpanded) return;
+
+    const unseen = detailSeqs.filter((seq) => !autoExpandedSeqsRef.current.has(seq));
+    if (unseen.length === 0) return;
+
+    for (const seq of unseen) {
+      autoExpandedSeqsRef.current.add(seq);
+    }
+    setExpandedSeqs((prev) => new Set([...prev, ...unseen]));
+  }, [task.id, defaultExpanded, detailSeqs]);
 
   // Toggling direction is a manual user action; jump the scroll container back
   // to the top so the newest end of the timeline (per the chosen direction) is
@@ -303,18 +372,70 @@ export function AgentTranscriptDialog({
     });
   }, [displayItems]);
 
-  // Toggle tool filter
-  const toggleTool = useCallback((tool: string) => {
-    setSelectedTools((prev) => {
+  const toggleSessionFilterKey = useCallback((key: TranscriptFilterKey) => {
+    setSessionFilterKeys((prev) => {
       const next = new Set(prev);
-      if (next.has(tool)) next.delete(tool);
-      else next.add(tool);
-      return next;
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return Array.from(next);
     });
   }, []);
 
   const clearFilters = useCallback(() => {
-    setSelectedTools(new Set());
+    if (preserveFilters) {
+      clearPersistedFilterKeys();
+      return;
+    }
+    setSessionFilterKeys([]);
+  }, [clearPersistedFilterKeys, preserveFilters]);
+
+  const toggleFilterKey = useCallback(
+    (key: TranscriptFilterKey) => {
+      if (preserveFilters) {
+        togglePersistedFilterKey(key);
+        return;
+      }
+      toggleSessionFilterKey(key);
+    },
+    [preserveFilters, togglePersistedFilterKey, toggleSessionFilterKey],
+  );
+
+  const handlePreserveFiltersChange = useCallback(
+    (next: boolean) => {
+      if (next) {
+        setPersistedFilterKeys(sessionFilterKeys);
+      } else {
+        setSessionFilterKeys(persistedFilterKeys);
+      }
+      setPreserveFilters(next);
+    },
+    [persistedFilterKeys, sessionFilterKeys, setPersistedFilterKeys, setPreserveFilters],
+  );
+
+  const handleToggleVisibleExpanded = useCallback(() => {
+    for (const seq of detailSeqs) {
+      autoExpandedSeqsRef.current.add(seq);
+    }
+    setExpandedSeqs((prev) => {
+      if (allVisibleDetailsExpanded) {
+        const next = new Set(prev);
+        for (const seq of detailSeqs) {
+          next.delete(seq);
+        }
+        return next;
+      }
+      return new Set([...prev, ...detailSeqs]);
+    });
+  }, [allVisibleDetailsExpanded, detailSeqs]);
+
+  const handleRowExpandedChange = useCallback((seq: number, expanded: boolean) => {
+    autoExpandedSeqsRef.current.add(seq);
+    setExpandedSeqs((prev) => {
+      const next = new Set(prev);
+      if (expanded) next.add(seq);
+      else next.delete(seq);
+      return next;
+    });
   }, []);
 
   // Duration
@@ -375,6 +496,30 @@ export function AgentTranscriptDialog({
             {statusBadge}
 
             <div className="ml-auto flex items-center gap-1">
+              {detailSeqs.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleToggleVisibleExpanded}
+                  aria-label={
+                    allVisibleDetailsExpanded
+                      ? t(($) => $.transcript.collapse_visible)
+                      : t(($) => $.transcript.expand_visible)
+                  }
+                  className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <ChevronRight
+                    className={cn(
+                      "h-3 w-3 transition-transform",
+                      !allVisibleDetailsExpanded && "rotate-90",
+                    )}
+                  />
+                  <span className="hidden sm:inline">
+                    {allVisibleDetailsExpanded
+                      ? t(($) => $.transcript.collapse_visible)
+                      : t(($) => $.transcript.expand_visible)}
+                  </span>
+                </button>
+              )}
               {items.length > 1 && (
                 <SortDirectionToggle
                   value={sortDirection}
@@ -391,16 +536,16 @@ export function AgentTranscriptDialog({
                   <DropdownMenuTrigger
                     className={cn(
                       "flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors",
-                      selectedTools.size > 0
+                      activeFilterKeys.length > 0
                         ? "text-blue-600 dark:text-blue-400 bg-blue-500/10 hover:bg-blue-500/20"
                         : "text-muted-foreground hover:text-foreground hover:bg-accent",
                     )}
                   >
                     <Filter className="h-3 w-3" />
                     {t(($) => $.transcript.filter)}
-                    {selectedTools.size > 0 && (
+                    {activeFilterKeys.length > 0 && (
                       <span className="ml-0.5 rounded-full bg-blue-500/20 px-1.5 py-0 text-[10px] font-medium">
-                        {selectedTools.size}
+                        {activeFilterKeys.length}
                       </span>
                     )}
                   </DropdownMenuTrigger>
@@ -408,13 +553,26 @@ export function AgentTranscriptDialog({
                     {filterOptions.map(([value, label]) => (
                       <DropdownMenuCheckboxItem
                         key={value}
-                        checked={selectedTools.has(value)}
-                        onCheckedChange={() => toggleTool(value)}
+                        checked={selectedFilterKeys.includes(value)}
+                        onCheckedChange={() => toggleFilterKey(value)}
                       >
                         {label}
                       </DropdownMenuCheckboxItem>
                     ))}
-                    {selectedTools.size > 0 && (
+                    <DropdownMenuSeparator />
+                    <DropdownMenuCheckboxItem
+                      checked={preserveFilters}
+                      onCheckedChange={(checked) => handlePreserveFiltersChange(checked === true)}
+                    >
+                      {t(($) => $.transcript.preserve_filters)}
+                    </DropdownMenuCheckboxItem>
+                    <DropdownMenuCheckboxItem
+                      checked={defaultExpanded}
+                      onCheckedChange={(checked) => setDefaultExpanded(checked === true)}
+                    >
+                      {t(($) => $.transcript.default_expanded)}
+                    </DropdownMenuCheckboxItem>
+                    {selectedFilterKeys.length > 0 && (
                       <>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem onClick={clearFilters} className="text-muted-foreground">
@@ -431,7 +589,7 @@ export function AgentTranscriptDialog({
                 className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
               >
                 {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                {copied ? t(($) => $.transcript.copied) : selectedTools.size > 0 ? t(($) => $.transcript.copy_filtered) : t(($) => $.transcript.copy_all)}
+                {copied ? t(($) => $.transcript.copied) : activeFilterKeys.length > 0 ? t(($) => $.transcript.copy_filtered) : t(($) => $.transcript.copy_all)}
               </button>
               <button
                 type="button"
@@ -481,7 +639,7 @@ export function AgentTranscriptDialog({
               <MetadataChip>{t(($) => $.transcript.tool_calls, { count: toolCount })}</MetadataChip>
             )}
             <MetadataChip>
-              {selectedTools.size > 0
+              {activeFilterKeys.length > 0
                 ? t(($) => $.transcript.events_filtered, { shown: filteredItems.length, total: items.length })
                 : t(($) => $.transcript.events, { count: items.length })}
             </MetadataChip>
@@ -570,6 +728,8 @@ export function AgentTranscriptDialog({
                   }}
                   item={item}
                   isSelected={selectedSeq === item.seq}
+                  expanded={expandedSeqs.has(item.seq)}
+                  onExpandedChange={(expanded) => handleRowExpandedChange(item.seq, expanded)}
                 />
               ))}
             </div>
@@ -718,14 +878,17 @@ function TimelineBar({
 interface TranscriptEventRowProps {
   item: TimelineItem;
   isSelected: boolean;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
 }
 
 const TranscriptEventRow = ({
   ref,
   item,
   isSelected,
+  expanded,
+  onExpandedChange,
 }: TranscriptEventRowProps & { ref?: React.Ref<HTMLDivElement> }) => {
-  const [expanded, setExpanded] = useState(false);
   const color = getEventColor(item);
   const label = getEventLabel(item);
   const summary = getEventSummary(item);
@@ -734,12 +897,7 @@ const TranscriptEventRow = ({
     [item.created_at],
   );
 
-  const hasDetail =
-    (item.type === "tool_use" && item.input && Object.keys(item.input).length > 0) ||
-    (item.type === "tool_result" && item.output && item.output.length > 0) ||
-    (item.type === "thinking" && item.content && item.content.length > 0) ||
-    (item.type === "text" && item.content && item.content.length > 0) ||
-    (item.type === "error" && item.content && item.content.length > 0);
+  const hasDetail = hasEventDetail(item);
 
   return (
     <div
@@ -749,7 +907,7 @@ const TranscriptEventRow = ({
         isSelected && "bg-accent/50",
       )}
     >
-      <Collapsible open={expanded} onOpenChange={setExpanded}>
+      <Collapsible open={expanded} onOpenChange={onExpandedChange}>
         <div className="flex items-start gap-2 px-4 py-2">
           {/* Type label badge */}
           <span
