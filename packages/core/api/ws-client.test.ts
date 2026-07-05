@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { WSClient } from "./ws-client";
+import {
+  HEARTBEAT_INTERVAL_MS,
+  HEARTBEAT_TIMEOUT_MS,
+  WSClient,
+} from "./ws-client";
 import type { WSMessage } from "../types/events";
 
 // Capture URL passed to WebSocket so we can assert the connect-time
 // query string.  We don't simulate the full WS lifecycle here — only the
-// upgrade URL construction, which is what carries client identity.
+// upgrade URL construction, which is what carries client identity, plus
+// enough of the message surface for the heartbeat tests.
 class FakeWebSocket {
+  static OPEN = 1;
   static lastUrl: string | null = null;
   static lastInstance: FakeWebSocket | null = null;
   // Fields read by WSClient.connect()/disconnect(), all no-op here.
@@ -13,13 +19,16 @@ class FakeWebSocket {
   onmessage: ((ev: { data: string }) => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
-  readyState = 0;
+  readyState = FakeWebSocket.OPEN;
+  sent: string[] = [];
+  close = vi.fn();
   constructor(url: string) {
     FakeWebSocket.lastUrl = url;
     FakeWebSocket.lastInstance = this;
   }
-  close() {}
-  send() {}
+  send(data: string) {
+    this.sent.push(data);
+  }
 }
 
 describe("WSClient", () => {
@@ -203,5 +212,82 @@ describe("WSClient", () => {
       "user-123",
       "user",
     );
+  });
+
+  describe("heartbeat", () => {
+    // Connect in token mode and complete auth so the heartbeat arms —
+    // returns the fake socket for frame injection.
+    const connectAndAuth = (ws: WSClient) => {
+      ws.setAuth("tok", "acme");
+      ws.connect();
+      const fakeWs = FakeWebSocket.lastInstance!;
+      fakeWs.onopen?.();
+      fakeWs.onmessage?.({ data: JSON.stringify({ type: "auth_ack" }) });
+      fakeWs.sent = []; // drop the auth frame
+      return fakeWs;
+    };
+    const pings = (fakeWs: FakeWebSocket) =>
+      fakeWs.sent.filter((f) => JSON.parse(f).type === "ping").length;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("pings an idle connection and closes the socket when nothing answers", () => {
+      const ws = new WSClient("ws://example.test/ws");
+      const fakeWs = connectAndAuth(ws);
+
+      vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
+      expect(pings(fakeWs)).toBe(1);
+      expect(fakeWs.close).not.toHaveBeenCalled();
+
+      // Half-open socket: no frame of any kind comes back.
+      vi.advanceTimersByTime(HEARTBEAT_TIMEOUT_MS);
+      expect(fakeWs.close).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the socket open when any frame arrives after the ping", () => {
+      const ws = new WSClient("ws://example.test/ws");
+      const fakeWs = connectAndAuth(ws);
+
+      vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
+      expect(pings(fakeWs)).toBe(1);
+      fakeWs.onmessage?.({ data: JSON.stringify({ type: "pong" }) });
+
+      vi.advanceTimersByTime(HEARTBEAT_TIMEOUT_MS * 2);
+      expect(fakeWs.close).not.toHaveBeenCalled();
+    });
+
+    it("does not ping while organic traffic proves liveness", () => {
+      const ws = new WSClient("ws://example.test/ws");
+      const fakeWs = connectAndAuth(ws);
+
+      // A frame lands mid-interval, so at every tick the connection has
+      // been idle for less than a full interval.
+      vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS / 2);
+      fakeWs.onmessage?.({
+        data: JSON.stringify({ type: "issue:updated", payload: {} }),
+      });
+      vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS / 2);
+      expect(pings(fakeWs)).toBe(0);
+
+      // Once truly idle for a full interval, the ping fires.
+      vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
+      expect(pings(fakeWs)).toBe(1);
+    });
+
+    it("stops the heartbeat on disconnect", () => {
+      const ws = new WSClient("ws://example.test/ws");
+      const fakeWs = connectAndAuth(ws);
+      ws.disconnect();
+
+      vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS * 3);
+      expect(pings(fakeWs)).toBe(0);
+      expect(fakeWs.close).toHaveBeenCalledTimes(1); // the disconnect() close only
+    });
   });
 });

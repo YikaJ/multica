@@ -206,6 +206,14 @@ export function useCreateIssue() {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      // Scoped lists (project / My Issues / actor panels) live under the
+      // `my` prefix and were previously refreshed only by the WS
+      // issue:created event — one missed event (half-open socket, relay
+      // gap) left the new issue permanently absent from the project view
+      // while the locally-patched workspace list looked fine (MUL-4076).
+      // Invalidate on settle so our own creations never depend on WS
+      // delivery.
+      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });

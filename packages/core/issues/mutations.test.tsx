@@ -10,6 +10,7 @@ import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import {
   useBatchUpdateIssues,
+  useCreateIssue,
   useLoadMoreByAssigneeGroup,
   useLoadMoreByStatus,
   useResolveComment,
@@ -34,6 +35,19 @@ import type {
 vi.mock("../hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
+
+// useCreateIssue records the new issue in the persisted recent-issues store;
+// persistence is irrelevant here and jsdom's localStorage is not available
+// through the zustand persist wrapper in this suite.
+vi.mock("./stores", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./stores")>();
+  return {
+    ...original,
+    useRecentIssuesStore: {
+      getState: () => ({ recordVisit: vi.fn() }),
+    },
+  };
+});
 
 const WS_ID = "ws-1";
 
@@ -384,6 +398,41 @@ describe("useLoadMoreByAssigneeGroup", () => {
       "issue-1",
       "issue-2",
     ]);
+  });
+});
+
+describe("useCreateIssue", () => {
+  let qc: QueryClient;
+  let createIssue: ReturnType<typeof vi.fn<(d: unknown) => Promise<Issue>>>;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    createIssue = vi.fn();
+    setApiInstance({ createIssue } as unknown as ApiClient);
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("invalidates scoped `my` lists on settle so the project view does not depend on the WS event (MUL-4076)", async () => {
+    createIssue.mockResolvedValue(makeIssue(1, { project_id: "project-9" }));
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+
+    const { result } = renderHook(() => useCreateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        title: "New issue",
+        project_id: "project-9",
+      });
+    });
+
+    const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(invalidatedKeys).toContainEqual(issueKeys.myAll(WS_ID));
   });
 });
 

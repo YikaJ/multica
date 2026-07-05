@@ -24,6 +24,20 @@ export interface WSClientIdentity {
   os?: string;
 }
 
+// Application-level heartbeat cadence. A socket can die without the client
+// ever receiving a close frame — macOS sleep/wake, a network-path change, or
+// a middlebox dropping the idle connection leaves a half-open WebSocket that
+// looks OPEN but receives nothing. Since every cache in the app trusts WS
+// events for freshness (staleTime: Infinity), such a socket silently freezes
+// Inbox / project / sub-issue views until a manual reload (MUL-4076). The
+// heartbeat turns that silent death into a normal close: ping every
+// HEARTBEAT_INTERVAL_MS when the connection is otherwise idle (the server
+// answers `{"type":"pong"}`), and if no frame of any kind arrives within
+// HEARTBEAT_TIMEOUT_MS, force-close so the standard onclose → reconnect →
+// onReconnect resync chain recovers the missed events.
+export const HEARTBEAT_INTERVAL_MS = 30_000;
+export const HEARTBEAT_TIMEOUT_MS = 10_000;
+
 export class WSClient {
   private ws: WebSocket | null = null;
   private baseUrl: string;
@@ -41,6 +55,9 @@ export class WSClient {
   private onReconnectCallbacks = new Set<() => void>();
   private anyHandlers = new Set<(msg: WSMessage) => void>();
   private logger: Logger;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private heartbeatTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastFrameAt = 0;
 
   constructor(
     url: string,
@@ -91,6 +108,10 @@ export class WSClient {
     };
 
     this.ws.onmessage = (event) => {
+      // Any inbound data proves the connection is alive — even a frame we
+      // fail to parse below. Feed the heartbeat before validation.
+      this.lastFrameAt = Date.now();
+      this.clearHeartbeatTimeout();
       let msg: WSMessage;
       try {
         msg = JSON.parse(event.data as string) as WSMessage;
@@ -137,6 +158,7 @@ export class WSClient {
     };
 
     this.ws.onclose = () => {
+      this.stopHeartbeat();
       this.logger.warn("disconnected, reconnecting in 3s");
       this.reconnectTimer = setTimeout(() => this.connect(), 3000);
     };
@@ -149,6 +171,7 @@ export class WSClient {
 
   private onAuthenticated() {
     this.logger.info("connected");
+    this.startHeartbeat();
     if (this.hasConnectedBefore) {
       for (const cb of this.onReconnectCallbacks) {
         try {
@@ -161,7 +184,45 @@ export class WSClient {
     this.hasConnectedBefore = true;
   }
 
+  // Heartbeat starts after auth (pre-auth frames would race the server's
+  // auth reader) and stops with the socket. Each tick pings only when the
+  // connection has been idle for a full interval — organic traffic already
+  // proves liveness — then expects SOME frame back within the timeout.
+  private startHeartbeat() {
+    this.stopHeartbeat();
+    this.lastFrameAt = Date.now();
+    this.heartbeatTimer = setInterval(() => {
+      if (this.ws?.readyState !== WebSocket.OPEN) return;
+      if (Date.now() - this.lastFrameAt < HEARTBEAT_INTERVAL_MS) return;
+      if (this.heartbeatTimeoutTimer) return; // ping already in flight
+      this.ws.send(JSON.stringify({ type: "ping" }));
+      this.heartbeatTimeoutTimer = setTimeout(() => {
+        this.heartbeatTimeoutTimer = null;
+        this.logger.warn("ws: heartbeat timed out — closing dead socket");
+        // close() on a half-open socket still fires onclose locally, which
+        // funnels into the normal reconnect + resync path.
+        this.ws?.close();
+      }, HEARTBEAT_TIMEOUT_MS);
+    }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  private clearHeartbeatTimeout() {
+    if (this.heartbeatTimeoutTimer) {
+      clearTimeout(this.heartbeatTimeoutTimer);
+      this.heartbeatTimeoutTimer = null;
+    }
+  }
+
+  private stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    this.clearHeartbeatTimeout();
+  }
+
   disconnect() {
+    this.stopHeartbeat();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
