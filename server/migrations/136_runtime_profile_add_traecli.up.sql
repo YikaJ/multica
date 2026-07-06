@@ -1,3 +1,7 @@
+-- DROP/ADD CHECK CONSTRAINT briefly needs ACCESS EXCLUSIVE on runtime_profile.
+-- Bound the wait during rolling API startup, matching migration 134.
+SET lock_timeout = '5s';
+
 ALTER TABLE runtime_profile DROP CONSTRAINT IF EXISTS runtime_profile_protocol_family_check;
 
 -- Widen the whitelist to include Trae (`traecli`). Trae already has a New()
@@ -23,3 +27,5 @@ ALTER TABLE runtime_profile ADD CONSTRAINT runtime_profile_protocol_family_check
         'qoder',
         'traecli'
     )) NOT VALID;
+
+RESET lock_timeout;

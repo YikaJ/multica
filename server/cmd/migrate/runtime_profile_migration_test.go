@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,63 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/migrations"
 )
+
+func TestRecentMigrationNumericPrefixesAreUnique(t *testing.T) {
+	migrationDir, err := migrations.ResolveDir()
+	if err != nil {
+		t.Fatalf("resolve migrations dir: %v", err)
+	}
+
+	for _, direction := range []string{"up", "down"} {
+		files, err := filepath.Glob(filepath.Join(migrationDir, "*."+direction+".sql"))
+		if err != nil {
+			t.Fatalf("glob %s migrations: %v", direction, err)
+		}
+		seen := make(map[int]string)
+		for _, file := range files {
+			prefix, ok := migrationNumericPrefix(file)
+			if !ok || prefix < 134 {
+				continue
+			}
+			if previous := seen[prefix]; previous != "" {
+				t.Fatalf("duplicate %s migration numeric prefix %d: %s and %s", direction, prefix, filepath.Base(previous), filepath.Base(file))
+			}
+			seen[prefix] = file
+		}
+	}
+}
+
+func TestRecentIndexMigrationsUseConcurrentSingleStatement(t *testing.T) {
+	migrationDir, err := migrations.ResolveDir()
+	if err != nil {
+		t.Fatalf("resolve migrations dir: %v", err)
+	}
+	files, err := filepath.Glob(filepath.Join(migrationDir, "*.up.sql"))
+	if err != nil {
+		t.Fatalf("glob up migrations: %v", err)
+	}
+
+	for _, file := range files {
+		prefix, ok := migrationNumericPrefix(file)
+		if !ok || prefix < 134 {
+			continue
+		}
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		sql := stripSQLLineComments(string(body))
+		for _, loc := range createIndexLocations(sql) {
+			afterCreateIndex := strings.TrimSpace(sql[loc[1]:])
+			if !strings.HasPrefix(strings.ToUpper(afterCreateIndex), "CONCURRENTLY") {
+				t.Fatalf("%s uses CREATE INDEX without CONCURRENTLY", filepath.Base(file))
+			}
+			if statements := strings.Count(sql, ";"); statements != 1 {
+				t.Fatalf("%s uses CREATE INDEX CONCURRENTLY with %d statements; it must be alone in the migration file", filepath.Base(file), statements)
+			}
+		}
+	}
+}
 
 func TestRuntimeProfileQoderMigrationSetsLockTimeout(t *testing.T) {
 	migrationDir, err := migrations.ResolveDir()
@@ -38,6 +96,53 @@ func TestRuntimeProfileQoderMigrationSetsLockTimeout(t *testing.T) {
 	}
 	if !(setIdx < dropIdx && dropIdx < resetIdx) {
 		t.Fatalf("qoder migration timeout wrapper order is wrong: set=%d drop=%d reset=%d", setIdx, dropIdx, resetIdx)
+	}
+}
+
+func migrationNumericPrefix(file string) (int, bool) {
+	base := filepath.Base(file)
+	head, _, ok := strings.Cut(base, "_")
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.Atoi(head)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+func stripSQLLineComments(sql string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(sql, "\n") {
+		if before, _, ok := strings.Cut(line, "--"); ok {
+			line = before
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func createIndexLocations(sql string) [][2]int {
+	upper := strings.ToUpper(sql)
+	var out [][2]int
+	for offset := 0; ; {
+		idx := strings.Index(upper[offset:], "CREATE ")
+		if idx == -1 {
+			return out
+		}
+		start := offset + idx
+		fields := strings.Fields(upper[start:])
+		if len(fields) >= 2 && fields[0] == "CREATE" {
+			if fields[1] == "INDEX" {
+				out = append(out, [2]int{start, start + len("CREATE INDEX")})
+			}
+			if len(fields) >= 3 && fields[1] == "UNIQUE" && fields[2] == "INDEX" {
+				out = append(out, [2]int{start, start + len("CREATE UNIQUE INDEX")})
+			}
+		}
+		offset = start + len("CREATE ")
 	}
 }
 
