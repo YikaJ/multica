@@ -111,3 +111,52 @@ func TestBatchUpdateIssueReassignDoesNotCancelActiveTasks(t *testing.T) {
 		t.Fatalf("unrelated agent's task must survive batch reassignment, got status %q", got)
 	}
 }
+
+// queuedTaskCountFor returns how many queued tasks the agent holds on the issue.
+func queuedTaskCountFor(t *testing.T, issueID, agentID string) int {
+	t.Helper()
+	var n int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, agentID).Scan(&n); err != nil {
+		t.Fatalf("count queued tasks: %v", err)
+	}
+	return n
+}
+
+// TestUpdateIssueReassignToAgentKeepsOldTaskAndEnqueuesNew covers the core
+// handoff path the member-target tests above do not: reassigning from one agent
+// to ANOTHER agent. The previous assignee's in-flight run must survive (the
+// #4963 / MUL-4113 no-cancel guarantee), and the new assignee must still get
+// its run enqueued by WillEnqueueRun — the two effects are independent.
+func TestUpdateIssueReassignToAgentKeepsOldTaskAndEnqueuesNew(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ownerAgent := createHandlerTestAgent(t, "ReassignAgentToAgentOwner", []byte("[]"))
+	newAgent := createHandlerTestAgent(t, "ReassignAgentToAgentNew", []byte("[]"))
+
+	issueID := insertAgentAssignedIssue(t, ownerAgent, 92112, "reassign-agent-to-agent")
+	ownerTask := insertRunningIssueTask(t, ownerAgent, issueID)
+
+	// Reassign from ownerAgent to newAgent — an agent→agent ownership handoff.
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"assignee_type": "agent",
+		"assignee_id":   newAgent,
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue reassign: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if got := taskStatus(t, ownerTask); got != "running" {
+		t.Fatalf("previous agent's own task must survive agent→agent reassignment, got status %q", got)
+	}
+	if got := queuedTaskCountFor(t, issueID, newAgent); got != 1 {
+		t.Fatalf("new assignee must get exactly one run enqueued, got %d queued tasks", got)
+	}
+}
