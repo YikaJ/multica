@@ -5,10 +5,53 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestRunningTimeoutSecondsUsesDefault(t *testing.T) {
+	t.Setenv("MULTICA_TASK_RUNNING_TIMEOUT", "")
+
+	got := runningTimeoutSeconds()
+	want := defaultRunningTimeout.Seconds()
+	if got != want {
+		t.Fatalf("runningTimeoutSeconds() = %v, want %v", got, want)
+	}
+}
+
+func TestRunningTimeoutSecondsUsesEnvOverride(t *testing.T) {
+	t.Setenv("MULTICA_TASK_RUNNING_TIMEOUT", "6h30m")
+
+	got := runningTimeoutSeconds()
+	want := (6*time.Hour + 30*time.Minute).Seconds()
+	if got != want {
+		t.Fatalf("runningTimeoutSeconds() = %v, want %v", got, want)
+	}
+}
+
+func TestRunningTimeoutSecondsRejectsInvalidEnv(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{"invalid_duration", "forever"},
+		{"zero_duration", "0s"},
+		{"negative_duration", "-1h"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("MULTICA_TASK_RUNNING_TIMEOUT", tt.value)
+
+			got := runningTimeoutSeconds()
+			want := defaultRunningTimeout.Seconds()
+			if got != want {
+				t.Fatalf("runningTimeoutSeconds() = %v, want fallback %v", got, want)
+			}
+		})
+	}
+}
 
 // setupSweeperTestFixture creates an issue and a task in the given status with
 // timestamps old enough to trigger the sweeper. Returns (issueID, agentID, taskID).

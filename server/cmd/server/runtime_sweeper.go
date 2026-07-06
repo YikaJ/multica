@@ -36,13 +36,15 @@ const (
 	// The dispatched→running transition should be near-instant, so 5 minutes
 	// means something went wrong (e.g. StartTask API call failed silently).
 	dispatchTimeoutSeconds = 300.0
-	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this. It is a
+	// defaultRunningTimeout fails tasks stuck in 'running' beyond this. It is a
 	// coarse server-side backstop keyed on started_at (it does NOT look at task
 	// activity) — mainly for runs whose daemon died without reporting. The
 	// daemon itself decides stuck-vs-long-running by activity (idle/tool
-	// watchdog), so this only needs to sit generously above any realistic single
-	// run rather than track a per-run wall-clock cap (MUL-3064).
-	runningTimeoutSeconds = 9000.0
+	// watchdog), so this only needs to sit generously above ordinary runs
+	// rather than track a per-run wall-clock cap (MUL-3064). Self-hosted
+	// deployments that intentionally run multi-hour compute can raise this with
+	// MULTICA_TASK_RUNNING_TIMEOUT.
+	defaultRunningTimeout = 150 * time.Minute
 	// queuedTTLSeconds expires tasks that have been sitting in 'queued'
 	// for longer than this without ever being claimed. This is the cleanup
 	// arm of the MUL-1899 backlog fix: even with the dispatch-time
@@ -246,7 +248,7 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus) {
 	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
 		DispatchTimeoutSecs: dispatchTimeoutSeconds,
-		RunningTimeoutSecs:  runningTimeoutSeconds,
+		RunningTimeoutSecs:  runningTimeoutSeconds(),
 	})
 	if err != nil {
 		slog.Warn("task sweeper: failed to clean up stale tasks", "error", err)
@@ -259,6 +261,10 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 	slog.Info("task sweeper: failed stale tasks", "count", len(failedTasks))
 	taskSvc.CaptureLeaseExpiredTasks(ctx, failedTasks)
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
+}
+
+func runningTimeoutSeconds() float64 {
+	return envDurationPositive("MULTICA_TASK_RUNNING_TIMEOUT", defaultRunningTimeout).Seconds()
 }
 
 // sweepExpiredQueuedTasks fails tasks that have been sitting in 'queued' for
