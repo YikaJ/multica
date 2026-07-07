@@ -1,7 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 import type { Agent, Squad, Workspace } from "../types";
-import { omitPendingDeletes } from "./pending-delete";
 
 export const workspaceKeys = {
   all: (wsId: string) => ["workspaces", wsId] as const,
@@ -23,11 +22,7 @@ export const workspaceKeys = {
 export function workspaceListOptions() {
   return queryOptions({
     queryKey: workspaceKeys.list(),
-    // A workspace with a DELETE in flight must not re-enter the cache via a
-    // concurrent refetch (realtime invalidation, reconnect recovery, explicit
-    // fetchQuery) — the server hasn't committed yet and would still return
-    // the row, undoing useDeleteWorkspace's optimistic removal.
-    queryFn: async () => omitPendingDeletes(await api.listWorkspaces()),
+    queryFn: () => api.listWorkspaces(),
   });
 }
 

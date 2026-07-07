@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { setApiInstance } from "../api";
@@ -10,8 +10,11 @@ import type { ApiClient } from "../api/client";
 import { defaultStorage } from "../platform/storage";
 import type { Workspace } from "../types";
 import { useDeleteWorkspace } from "./mutations";
-import { workspaceKeys, workspaceListOptions } from "./queries";
-import { unmarkWorkspaceDeletePending } from "./pending-delete";
+import { workspaceKeys } from "./queries";
+import {
+  isWorkspaceDeletePending,
+  unmarkWorkspaceDeletePending,
+} from "./pending-delete";
 
 function createWrapper(qc: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -38,13 +41,13 @@ describe("useDeleteWorkspace", () => {
   let deleteWorkspace: ReturnType<typeof vi.fn<(id: string) => Promise<void>>>;
   let listWorkspaces: ReturnType<typeof vi.fn<() => Promise<Workspace[]>>>;
 
-  const staleServerList = () => [
+  const serverList = () => [
     makeWorkspace("ws-1", "keep-me"),
     makeWorkspace("ws-2", "delete-me"),
   ];
 
   const seedList = () => {
-    qc.setQueryData<Workspace[]>(workspaceKeys.list(), staleServerList());
+    qc.setQueryData<Workspace[]>(workspaceKeys.list(), serverList());
   };
 
   const cachedList = () =>
@@ -53,25 +56,25 @@ describe("useDeleteWorkspace", () => {
   beforeEach(() => {
     qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     deleteWorkspace = vi.fn().mockResolvedValue(undefined);
-    listWorkspaces = vi.fn().mockResolvedValue(staleServerList());
+    listWorkspaces = vi.fn().mockResolvedValue(serverList());
     setApiInstance({ deleteWorkspace, listWorkspaces } as unknown as ApiClient);
   });
 
   afterEach(() => {
     qc.clear();
-    // The tombstone registry is module state; onSettled unmarks it in every
-    // test flow, but keep a belt-and-braces reset so one failing test can't
-    // poison the others.
+    // The self-initiated marker is module state and is intentionally KEPT
+    // after a successful delete (it suppresses the WS echo); reset it so
+    // tests stay independent.
     unmarkWorkspaceDeletePending("ws-2");
     localStorage.clear();
     vi.restoreAllMocks();
   });
 
-  it("removes the workspace from the list cache while the DELETE is pending", async () => {
+  it("leaves the list cache untouched while the DELETE is pending (no optimistic removal)", async () => {
     seedList();
-    // Hold the DELETE open so we can observe the pending window — the bug
-    // was that during this window the list cache still contained the
-    // workspace, so any consumer re-presented it as selectable/current.
+    // Hold the DELETE open to observe the pending window. The flow awaits
+    // the mutation with the dialog in a loading state, so the cache must
+    // keep reflecting server truth: the workspace still exists.
     let resolveDelete!: () => void;
     deleteWorkspace.mockReturnValue(
       new Promise<void>((resolve) => {
@@ -86,18 +89,16 @@ describe("useDeleteWorkspace", () => {
     let mutationDone: Promise<void>;
     await act(async () => {
       mutationDone = result.current.mutateAsync("ws-2");
-      // Let onMutate (cancelQueries + optimistic removal) run.
       await Promise.resolve();
     });
 
     expect(deleteWorkspace).toHaveBeenCalledWith("ws-2");
-    expect(cachedList().map((w) => w.id)).toEqual(["ws-1"]);
+    expect(cachedList().map((w) => w.id)).toEqual(["ws-1", "ws-2"]);
 
     await act(async () => {
       resolveDelete();
       await mutationDone;
     });
-    expect(cachedList().map((w) => w.id)).toEqual(["ws-1"]);
   });
 
   it("invalidates the workspace list after a successful delete", async () => {
@@ -113,28 +114,11 @@ describe("useDeleteWorkspace", () => {
     expect(qc.getQueryState(workspaceKeys.list())?.isInvalidated).toBe(true);
   });
 
-  it("rolls the list back when the DELETE fails", async () => {
+  it("clears the deleted slug's workspace-scoped storage on success", async () => {
     seedList();
-    deleteWorkspace.mockRejectedValue(new Error("boom"));
-
-    const { result } = renderHook(() => useDeleteWorkspace(), {
-      wrapper: createWrapper(qc),
-    });
-
-    await act(async () => {
-      await expect(result.current.mutateAsync("ws-2")).rejects.toThrow("boom");
-    });
-
-    await waitFor(() => {
-      expect(cachedList().map((w) => w.id)).toEqual(["ws-1", "ws-2"]);
-    });
-  });
-
-  it("clears the deleted slug's workspace-scoped storage on success, using the pre-removal slug", async () => {
-    seedList();
-    // The realtime `workspace:deleted` handler reverse-looks-up the slug from
-    // the list cache — which the optimistic removal has already emptied on
-    // the initiating client — so the mutation itself must own this cleanup.
+    // The realtime `workspace:deleted` handler skips self-initiated deletes,
+    // so the mutation owns this cleanup; the slug is captured from the list
+    // cache before the mutation fires.
     defaultStorage.setItem("multica_issue_draft:delete-me", "draft");
     defaultStorage.setItem("multica_issue_draft:keep-me", "draft");
 
@@ -150,7 +134,7 @@ describe("useDeleteWorkspace", () => {
     expect(defaultStorage.getItem("multica_issue_draft:keep-me")).toBe("draft");
   });
 
-  it("does not clear workspace-scoped storage when the DELETE fails", async () => {
+  it("leaves storage and cache untouched when the DELETE fails", async () => {
     seedList();
     deleteWorkspace.mockRejectedValue(new Error("boom"));
     defaultStorage.setItem("multica_issue_draft:delete-me", "draft");
@@ -163,60 +147,31 @@ describe("useDeleteWorkspace", () => {
       await expect(result.current.mutateAsync("ws-2")).rejects.toThrow("boom");
     });
 
+    // No optimistic write happened, so there is nothing to roll back.
     expect(defaultStorage.getItem("multica_issue_draft:delete-me")).toBe("draft");
+    expect(cachedList().map((w) => w.id)).toEqual(["ws-1", "ws-2"]);
   });
 
-  it("keeps the workspace out of the cache when a list refetch lands mid-pending", async () => {
+  it("keeps the self-initiated marker after success and lifts it after failure", async () => {
     seedList();
-    let resolveDelete!: () => void;
-    deleteWorkspace.mockReturnValue(
-      new Promise<void>((resolve) => {
-        resolveDelete = resolve;
-      }),
-    );
-
     const { result } = renderHook(() => useDeleteWorkspace(), {
       wrapper: createWrapper(qc),
     });
 
-    let mutationDone: Promise<void>;
+    // Success: the id is gone for good; the kept marker suppresses the WS
+    // echo of our own delete whenever it arrives.
     await act(async () => {
-      mutationDone = result.current.mutateAsync("ws-2");
-      await Promise.resolve();
+      await result.current.mutateAsync("ws-2");
     });
-    expect(cachedList().map((w) => w.id)).toEqual(["ws-1"]);
+    expect(isWorkspaceDeletePending("ws-2")).toBe(true);
 
-    // Simulate a refetch during the pending window (realtime invalidation /
-    // reconnect recovery / explicit fetchQuery) where the server has not
-    // committed the delete yet and still returns the old row.
-    await act(async () => {
-      await qc.fetchQuery({ ...workspaceListOptions(), staleTime: 0 });
-    });
-    expect(listWorkspaces).toHaveBeenCalled();
-    expect(cachedList().map((w) => w.id)).toEqual(["ws-1"]);
-
-    await act(async () => {
-      resolveDelete();
-      await mutationDone;
-    });
-    expect(cachedList().map((w) => w.id)).toEqual(["ws-1"]);
-  });
-
-  it("lifts the tombstone after a failed DELETE settles, so refetches show the restored row", async () => {
-    seedList();
+    // Failure: the workspace still exists, so a later external delete of
+    // the same id must be handled by the realtime handler again.
+    unmarkWorkspaceDeletePending("ws-2");
     deleteWorkspace.mockRejectedValue(new Error("boom"));
-
-    const { result } = renderHook(() => useDeleteWorkspace(), {
-      wrapper: createWrapper(qc),
-    });
-
     await act(async () => {
       await expect(result.current.mutateAsync("ws-2")).rejects.toThrow("boom");
     });
-
-    await act(async () => {
-      await qc.fetchQuery({ ...workspaceListOptions(), staleTime: 0 });
-    });
-    expect(cachedList().map((w) => w.id)).toEqual(["ws-1", "ws-2"]);
+    expect(isWorkspaceDeletePending("ws-2")).toBe(false);
   });
 });

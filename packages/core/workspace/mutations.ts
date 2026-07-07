@@ -45,49 +45,35 @@ export function useDeleteWorkspace() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (workspaceId: string) => api.deleteWorkspace(workspaceId),
-    // Optimistically drop the workspace from the list cache while the
-    // DELETE is in flight. The delete flow navigates away BEFORE awaiting
-    // the mutation (see workspace-tab.tsx's navigateAwayFromCurrentWorkspace
-    // for the CancelledError race that forces that ordering), so during the
-    // pending window every list consumer — sidebar switcher, by-slug route
-    // resolution, post-auth destination — must already see the workspace as
-    // gone, or a concurrent list refetch re-presents it as selectable and
-    // it can be re-entered mid-delete.
-    onMutate: async (workspaceId) => {
-      // Tombstone until settled: refetches that land while the DELETE is
-      // pending go through workspaceListOptions' queryFn, which filters
-      // against this registry — without it, an invalidation/reconnect
-      // refetch would write the not-yet-committed row straight back.
+    // No optimistic removal: the delete flow awaits this mutation with the
+    // confirm dialog in a loading state and only navigates on success, so
+    // the cache staying truthful (server still has the row until commit)
+    // is correct, and a failed DELETE needs no rollback.
+    onMutate: (workspaceId) => {
+      // Mark the delete as self-initiated so the realtime `workspace:deleted`
+      // handler no-ops instead of racing this flow's navigation with its own
+      // full-page relocate. See pending-delete.ts for lifetime rules.
       markWorkspaceDeletePending(workspaceId);
-      // Cancel in-flight list fetches so a response that started before the
-      // delete can't land after the optimistic update and resurrect the row.
-      await qc.cancelQueries({ queryKey: workspaceKeys.list() });
-      const previous = qc.getQueryData<Workspace[]>(workspaceKeys.list());
-      qc.setQueryData<Workspace[]>(workspaceKeys.list(), (old) =>
-        old?.filter((w) => w.id !== workspaceId),
-      );
-      // Capture the slug BEFORE the optimistic removal erases the row: the
-      // realtime `workspace:deleted` handler reverse-looks-up the slug from
-      // this same cache to clear `${key}:${slug}` storage, so on the
-      // initiating client that lookup misses and cleanup falls to onSuccess.
-      return { previous, slug: previous?.find((w) => w.id === workspaceId)?.slug };
+      // Capture the slug for onSuccess's storage cleanup — cheap here, and
+      // the row is guaranteed to still be in the list pre-mutation.
+      const slug = qc
+        .getQueryData<Workspace[]>(workspaceKeys.list())
+        ?.find((w) => w.id === workspaceId)?.slug;
+      return { slug };
     },
     // Success is the only path that clears the deleted workspace's persisted
     // `${key}:${slug}` namespace — a failed DELETE means the workspace still
-    // exists and its drafts/view state must survive.
+    // exists and its drafts/view state must survive. The realtime handler
+    // skips self-initiated deletes, so cleanup has to happen here.
     onSuccess: (_data, _workspaceId, ctx) => {
       if (ctx?.slug) clearWorkspaceStorage(defaultStorage, ctx.slug);
     },
-    // Rollback: the server still has the workspace, so put it back in the
-    // list (the caller surfaces the error toast). onSettled's invalidate
-    // then reconciles against server truth either way.
-    onError: (_err, _workspaceId, ctx) => {
-      if (ctx?.previous) qc.setQueryData(workspaceKeys.list(), ctx.previous);
-    },
-    onSettled: (_data, _err, workspaceId) => {
-      // Lift the tombstone before invalidating so the reconcile refetch
-      // reflects server truth: gone on success, restored on failure.
+    // The workspace still exists after a failed DELETE, so a later external
+    // delete of the same ID must be handled by the realtime handler again.
+    onError: (_err, workspaceId) => {
       unmarkWorkspaceDeletePending(workspaceId);
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: workspaceKeys.list() });
     },
   });

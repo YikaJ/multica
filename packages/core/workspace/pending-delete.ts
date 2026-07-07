@@ -1,15 +1,20 @@
 /**
- * Registry of workspace IDs with a DELETE in flight.
+ * Registry of workspace IDs whose DELETE was initiated by THIS client.
  *
- * Marked in useDeleteWorkspace.onMutate, cleared in onSettled. The workspace
- * list queryFn filters against it so a refetch that lands during the pending
- * window (realtime invalidation, reconnect recovery, explicit fetchQuery)
- * cannot write the not-yet-committed row back into the visible cache after
- * the optimistic removal.
+ * Marked in useDeleteWorkspace.onMutate. The realtime `workspace:deleted`
+ * handler checks it and no-ops for self-initiated deletes: the mutation flow
+ * owns storage cleanup and navigation (both run after the DELETE resolves),
+ * and letting the handler react too would race that flow's navigation with
+ * its own full-page relocate.
  *
- * Module scope rather than React state because the queryFn runs outside the
- * component tree. A hard reload drops the registry, which matches server
- * truth: an uncommitted delete's workspace legitimately still exists.
+ * Lifted only when the DELETE fails — the workspace still exists, so a later
+ * external delete of the same ID must be handled normally. On success the ID
+ * is gone for good, and keeping the mark suppresses the WS echo of our own
+ * delete no matter when it arrives.
+ *
+ * Module scope rather than React state because the realtime handler runs
+ * outside the component tree. Per-tab by construction: other tabs/devices
+ * have an empty registry, so their handlers process the event normally.
  */
 const pendingDeletes = new Set<string>();
 
@@ -21,8 +26,7 @@ export function unmarkWorkspaceDeletePending(workspaceId: string) {
   pendingDeletes.delete(workspaceId);
 }
 
-/** Drop rows whose delete is still in flight from a fetched workspace list. */
-export function omitPendingDeletes<T extends { id: string }>(list: T[]): T[] {
-  if (pendingDeletes.size === 0) return list;
-  return list.filter((w) => !pendingDeletes.has(w.id));
+/** True if this client initiated a DELETE for the workspace. */
+export function isWorkspaceDeletePending(workspaceId: string): boolean {
+  return pendingDeletes.has(workspaceId);
 }
