@@ -70,6 +70,50 @@ func TestListRuntimeLocalSkills_Claude(t *testing.T) {
 	}
 }
 
+// TestListRuntimeLocalSkills_Codebuddy is the regression guard for a bug
+// where CodeBuddy was treated as a drop-in alias for Claude and local
+// (user-level) skills were discovered from ~/.claude/skills. CodeBuddy Code
+// is a Claude Code fork but ships its own native config directory and does
+// NOT read ~/.claude/skills by default — see
+// https://www.codebuddy.ai/docs/cli/skills ("User-level Skills:
+// ~/.codebuddy/skills/"). Discovery must use ~/.codebuddy/skills instead.
+func TestListRuntimeLocalSkills_Codebuddy(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".codebuddy", "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: CodeBuddy Review\ndescription: Review code with CodeBuddy\n---\n# CodeBuddy Review\n",
+	})
+	// A same-named skill under ~/.claude/skills must NOT be picked up for
+	// the codebuddy provider — this is the exact regression this test
+	// guards against.
+	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "claude-only", map[string]string{
+		"SKILL.md": "---\nname: Claude Only\ndescription: Should not appear for codebuddy\n---\n# Claude Only\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("codebuddy")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("codebuddy should be supported")
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d: %+v", len(skills), skills)
+	}
+
+	skill := skills[0]
+	if skill.Key != "review-helper" {
+		t.Fatalf("key = %q, want review-helper", skill.Key)
+	}
+	if skill.Name != "CodeBuddy Review" {
+		t.Fatalf("name = %q, want CodeBuddy Review", skill.Name)
+	}
+	if skill.SourcePath != "~/.codebuddy/skills/review-helper" {
+		t.Fatalf("source_path = %q, want ~/.codebuddy/skills/review-helper", skill.SourcePath)
+	}
+}
+
 func TestListRuntimeLocalSkills_Kiro(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
