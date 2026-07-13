@@ -745,7 +745,7 @@ func TestReuseReclaimsManagedSkillDirWithStrayAgentFile(t *testing.T) {
 func TestReuseSkillRefreshIsCanonicalAcrossProviders(t *testing.T) {
 	t.Parallel()
 
-	for _, provider := range []string{"claude", "openclaw", "copilot", ""} {
+	for _, provider := range []string{"claude", "codebuddy", "openclaw", "copilot", ""} {
 		provider := provider
 		name := provider
 		if name == "" {
