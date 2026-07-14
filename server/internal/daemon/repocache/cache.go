@@ -51,7 +51,16 @@ func gitEnv() []string {
 	)
 }
 
-var agentGitExcludePatterns = []string{".agent_context", "CLAUDE.md", "AGENTS.md", ".claude", ".opencode", "CODEBUDDY.md", ".codebuddy"}
+var agentGitExcludePatterns = []string{
+	".agent_context",
+	"CLAUDE.md",
+	"AGENTS.md",
+	".claude",
+	".opencode",
+	".deveco",
+	"CODEBUDDY.md",
+	".codebuddy",
+}
 
 const repoCacheGitTimeout = 10 * time.Minute
 

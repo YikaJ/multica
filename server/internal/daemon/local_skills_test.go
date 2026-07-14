@@ -111,8 +111,8 @@ func TestListRuntimeLocalSkills_Codebuddy(t *testing.T) {
 	writeTestLocalSkill(t, filepath.Join(home, ".codebuddy", "skills"), "review-helper", map[string]string{
 		"SKILL.md": "---\nname: CodeBuddy Review\ndescription: Review code with CodeBuddy\n---\n# CodeBuddy Review\n",
 	})
-	// Same key under ~/.claude/skills must NOT win for the codebuddy
-	// provider — this is the exact regression this test guards against.
+	// ~/.claude/skills is not a CodeBuddy discovery root, so this must not
+	// appear for the codebuddy provider.
 	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "review-helper", map[string]string{
 		"SKILL.md": "---\nname: Claude Review\ndescription: Should not appear for codebuddy\n---\n# Claude Review\n",
 	})
@@ -133,10 +133,45 @@ func TestListRuntimeLocalSkills_Codebuddy(t *testing.T) {
 		t.Fatalf("key = %q, want review-helper", skill.Key)
 	}
 	if skill.Name != "CodeBuddy Review" {
-		t.Fatalf("name = %q, want CodeBuddy Review (codebuddy root must win over ~/.claude)", skill.Name)
+		t.Fatalf("name = %q, want CodeBuddy Review", skill.Name)
 	}
 	if skill.SourcePath != "~/.codebuddy/skills/review-helper" {
 		t.Fatalf("source_path = %q, want ~/.codebuddy/skills/review-helper", skill.SourcePath)
+	}
+}
+
+func TestRuntimeLocalSkills_CodebuddyExcludesClaudePluginSkills(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".codebuddy", "skills"), "codebuddy-only", map[string]string{
+		"SKILL.md": "---\nname: CodeBuddy Only\n---\n",
+	})
+	installPath := writeTestClaudePlugin(t, home, "paper-desktop@paper", "paper-desktop", true)
+	writeTestLocalSkill(t, filepath.Join(installPath, "skills"), "design-to-code", map[string]string{
+		"SKILL.md": "---\nname: Claude Plugin Skill\n---\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("codebuddy")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("codebuddy should be supported")
+	}
+	if len(skills) != 1 || skills[0].Key != "codebuddy-only" {
+		t.Fatalf("CodeBuddy must not list Claude plugin skills, got %#v", skills)
+	}
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("codebuddy", "paper-desktop:design-to-code")
+	if !supported {
+		t.Fatal("codebuddy should be supported for import")
+	}
+	if err == nil || err.Error() != "local skill not found" {
+		t.Fatalf("load Claude plugin skill for CodeBuddy err = %v, want local skill not found", err)
+	}
+	if bundle != nil {
+		t.Fatalf("load Claude plugin skill for CodeBuddy bundle = %#v, want nil", bundle)
 	}
 }
 

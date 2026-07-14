@@ -122,6 +122,7 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // Claude:      skills → {workDir}/.claude/skills/{name}/SKILL.md  (native discovery)
 // CodeBuddy:   skills → {workDir}/.codebuddy/skills/{name}/SKILL.md  (native discovery — CodeBuddy is a Claude Code fork but uses its own config directory, not .claude/; see https://www.codebuddy.ai/docs/cli/skills)
 // Codex:       skills → handled separately in Prepare via codex-home
+// Hermes:      skills → handled separately in Prepare via hermes-home (HERMES_HOME/skills; Hermes has no workspace-relative discovery, see hermes_home.go)
 // Copilot:     skills → {workDir}/.github/skills/{name}/SKILL.md  (native project-level discovery)
 // OpenCode:    skills → {workDir}/.opencode/skills/{name}/SKILL.md  (native discovery)
 // OpenClaw:    skills → {workDir}/skills/{name}/SKILL.md  (native discovery — paired with a per-task synthesized openclaw-config.json that pins agents.defaults.workspace to workDir; see openclaw_config.go)
@@ -166,14 +167,20 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 	}
 
 	if len(ctx.AgentSkills) > 0 {
-		skillsDir, err := resolveSkillsDir(workDir, provider, manifest)
-		if err != nil {
-			return fmt.Errorf("resolve skills dir: %w", err)
-		}
-		// Codex skills are written to codex-home in Prepare; skip here.
-		if provider != "codex" {
-			if err := writeSkillFiles(skillsDir, ctx.AgentSkills, manifest); err != nil {
-				return fmt.Errorf("write skill files: %w", err)
+		// Hermes materializes skills into its per-task HERMES_HOME/skills during
+		// Prepare (Hermes has no workspace-relative discovery), so it needs no
+		// workdir-local skills dir at all — skip the resolve too, to avoid
+		// leaving an empty .agent_context/skills/ behind.
+		if provider != "hermes" {
+			skillsDir, err := resolveSkillsDir(workDir, provider, manifest)
+			if err != nil {
+				return fmt.Errorf("resolve skills dir: %w", err)
+			}
+			// Codex skills are written to codex-home in Prepare; skip here.
+			if provider != "codex" {
+				if err := writeSkillFiles(skillsDir, ctx.AgentSkills, manifest); err != nil {
+					return fmt.Errorf("write skill files: %w", err)
+				}
 			}
 		}
 	}
@@ -348,6 +355,13 @@ func skillsDirPath(workDir, provider string) string {
 		// without those, OpenCode walks from the daemon's inherited PWD and
 		// misses .opencode/skills + AGENTS.md entirely (MUL-2416).
 		return filepath.Join(workDir, ".opencode", "skills")
+	case "deveco":
+		// DevEco Code (Huawei's OpenCode fork) natively discovers project
+		// skills from .deveco/skills/ in the workdir, mirroring OpenCode's
+		// .opencode/skills layout under its DEVECO_-prefixed brand. Discovery
+		// is anchored at the task workdir via `deveco run --dir <workDir>` +
+		// the PWD override in devecoBackend, same anchor OpenCode uses.
+		return filepath.Join(workDir, ".deveco", "skills")
 	case "openclaw":
 		// OpenClaw's native skill scanner reads <workspaceDir>/skills/. The
 		// daemon pairs this with a per-task synthesized openclaw-config.json
@@ -674,10 +688,11 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("## Quick Start\n\n")
 	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
 
-	if len(ctx.AgentSkills) > 0 {
+	skills := modelVisibleSkills(ctx.AgentSkills)
+	if len(skills) > 0 {
 		b.WriteString("## Agent Skills\n\n")
 		b.WriteString("The following skills are available to you:\n\n")
-		for _, skill := range ctx.AgentSkills {
+		for _, skill := range skills {
 			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
 		}
 		b.WriteString("\n")
@@ -698,9 +713,10 @@ func renderQuickCreateContext(ctx TaskContextForEnv) string {
 	b.WriteString("> ")
 	b.WriteString(ctx.QuickCreatePrompt)
 	b.WriteString("\n\n")
-	if len(ctx.AgentSkills) > 0 {
+	skills := modelVisibleSkills(ctx.AgentSkills)
+	if len(skills) > 0 {
 		b.WriteString("## Agent Skills\n\n")
-		for _, skill := range ctx.AgentSkills {
+		for _, skill := range skills {
 			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
 		}
 		b.WriteString("\n")
@@ -737,10 +753,11 @@ func renderAutopilotContext(ctx TaskContextForEnv) string {
 		b.WriteString("\n\n")
 	}
 
-	if len(ctx.AgentSkills) > 0 {
+	skills := modelVisibleSkills(ctx.AgentSkills)
+	if len(skills) > 0 {
 		b.WriteString("## Agent Skills\n\n")
 		b.WriteString("The following skills are available to you:\n\n")
-		for _, skill := range ctx.AgentSkills {
+		for _, skill := range skills {
 			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
 		}
 		b.WriteString("\n")

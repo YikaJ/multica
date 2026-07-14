@@ -142,6 +142,8 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		providerRoot = filepath.Join(home, ".copilot", "skills")
 	case "opencode":
 		providerRoot = filepath.Join(home, ".config", "opencode", "skills")
+	case "deveco":
+		providerRoot = filepath.Join(home, ".config", "deveco", "skills")
 	case "openclaw":
 		providerRoot = filepath.Join(home, ".openclaw", "skills")
 	case "pi":
@@ -172,7 +174,7 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		{path: providerRoot, kind: localSkillRootProvider},
 		{path: filepath.Join(home, ".agents", "skills"), kind: localSkillRootUniversal},
 	}
-	if provider == "claude" || provider == "codebuddy" {
+	if provider == "claude" {
 		for _, plugin := range listEnabledClaudePlugins(home) {
 			manifest, _ := readClaudePluginManifest(plugin.InstallPath)
 			for _, path := range claudePluginComponentPaths(
