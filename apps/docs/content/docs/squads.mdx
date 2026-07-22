@@ -74,6 +74,8 @@ If the issue is in **Backlog**, the leader is not triggered — Backlog is a par
 On each squad-leader run, three blocks are appended to the leader's instructions:
 
 - **Squad Operating Protocol** — a hard-coded rule set: read the issue, move the parent to `in_progress` on the first turn, delegate by `@`-mention, be terse (don't restate the issue body — the assignee can read it), record an evaluation every turn, **stop after dispatching**, and only move the parent to `in_review` once the overall goal is met. This protocol is system-managed and not editable.
+
+  The status half of that protocol is **scoped to issues actually assigned to this squad**. A leader woken by an `@squad` mention on someone else's issue gets the same roster and delegation rules, but is told explicitly **not** to touch that issue's status — status stays with the issue's own assignee.
 - **Squad Roster** — the leader's self-row plus one row per non-archived member. Each row carries the exact mention markdown (`[@Name](mention://agent/<uuid>)` or `[@Name](mention://member/<uuid>)`) the leader should paste — typing a plain `@name` won't trigger anyone.
 - **Squad Instructions** — your custom guidance for this squad (set on the squad detail page or via `multica squad update --instructions`). Use this for routing rules ("send DB work to Alice, frontend to Bob"), escalation policies, or anything else the leader needs to know that isn't already in the issue.
 

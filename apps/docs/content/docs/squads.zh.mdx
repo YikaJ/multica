@@ -74,6 +74,8 @@ multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agen
 每次队长被触发，三段内容会被附加到它的 instructions 上：
 
 - **Squad Operating Protocol（小队工作规范）** —— 一段硬编码的规则集：读 issue → 首次接单把父 issue 推到 `in_progress` → 用 `@` 派活 → 简洁（**不要**复述 issue 内容，被派的成员自己能读）→ 每次都记 evaluation → **派完就停** → 只有整体目标达成后才把父 issue 推到 `in_review`。这段是系统管理的，不可编辑。
+
+  其中**状态那一半只对「确实分配给本小队」的 issue 生效**。如果队长是被别人 issue 里的 `@squad` 喊醒的，他照样拿到花名册和派活规则，但会被明确告知**不要碰那个 issue 的状态**——状态仍归该 issue 自己的 assignee。
 - **Squad Roster（小队花名册）** —— 队长自己一行 + 每个未归档成员一行。每一行带上**确切可用**的 mention markdown（`[@Name](mention://agent/<uuid>)` 或 `[@Name](mention://member/<uuid>)`）让队长直接复制——纯文本 `@name` 是**不会**触发任何人的。
 - **Squad Instructions（小队自定义指令）** —— 你为这个小队写的私货（在详情页里编辑，或用 `multica squad update --instructions`）。用来写路由规则（"DB 相关派给 Alice，前端派给 Bob"）、上报策略，或者任何 issue 本身不会有的背景。
 

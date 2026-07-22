@@ -162,6 +162,45 @@ func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
 	if !strings.Contains(out, guardrail) {
 		t.Errorf("expected the comment-triggered workflow guardrail %q to be present", guardrail)
 	}
+
+	// For an ordinary agent the guardrail is absolute — the squad-leader
+	// carve-out below must not leak into this path.
+	if strings.Contains(out, "Own the parent issue status") {
+		t.Errorf("ordinary-agent comment brief must not reference the squad status grant:\n%s", out)
+	}
+}
+
+// A squad leader on a comment-triggered turn gets the same guardrail plus a
+// named exception. Without it the guardrail and the Squad Operating Protocol's
+// "Own the parent issue status" responsibility contradict each other on the
+// @mention-dispatch shape, where the member's delivery comment never asks for
+// a status change and no child-done system comment exists to ask on its
+// behalf — so the parent would sit in in_progress forever.
+func TestCommentTriggeredSquadLeaderDefersToStatusOwnershipGrant(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:          "55555555-6666-7777-8888-999999999999",
+		TriggerCommentID: "66666666-7777-8888-9999-aaaaaaaaaaaa",
+		IsSquadLeader:    true,
+	})
+
+	for _, want := range []string{
+		"Do NOT change the issue status unless the comment explicitly asks for it",
+		`Squad Operating Protocol's "Own the parent issue status"`,
+		"only appears when this issue is assigned to your squad",
+		"without waiting to be asked",
+		"When it is absent, the rule above is absolute.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("squad-leader comment brief missing %q\n---\n%s", want, out)
+		}
+	}
+
+	// The unqualified sentence must be gone: its presence alongside the grant
+	// is the contradiction this branch exists to remove.
+	if strings.Contains(out, "explicitly asks for it\n") {
+		t.Errorf("squad-leader comment brief still ends the guardrail unqualified\n---\n%s", out)
+	}
 }
 
 // The CLAUDE.md workflow surface must carry the same issue-wide since-delta
