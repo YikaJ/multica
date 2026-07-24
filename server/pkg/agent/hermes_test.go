@@ -1738,6 +1738,12 @@ func TestHermesProviderErrorSnifferRealErrorsAfterSingleLineInfo(t *testing.T) {
 			stream: "2026-07-24 10:09:00 [INFO] root: {\"message\":\"ordinary echo\"}\n" +
 				"2026-07-24 10:09:01 [ERROR] acp_adapter.server: ❌ API call failed after 3 retries: HTTP 429 rate limit exceeded\n",
 		},
+		{
+			name: "bare provider error after echo truncated inside string",
+			stream: "2026-07-24 10:09:00 [INFO] root: {\"message\":\"truncated echo\n" +
+				"❌ API call failed after 3 retries: RateLimitError [HTTP 429]\n" +
+				"📝 Error: HTTP 429 rate limit exceeded\n",
+		},
 	}
 
 	for _, tt := range tests {

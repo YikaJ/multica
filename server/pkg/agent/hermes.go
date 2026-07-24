@@ -2196,12 +2196,14 @@ func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 		} else if s.echoJSON {
 			// A strong, unindented provider-error header is a new bare
 			// error block even if a malformed echo never closed. Indented
-			// error-looking text remains part of the structured echo.
+			// error-looking text remains part of the structured echo. This
+			// also applies when the echo was truncated inside a JSON string:
+			// an unescaped physical newline is not valid inside that string.
 			indented := rawLine[0] == ' ' || rawLine[0] == '\t'
 			bareError := strings.HasPrefix(line, "⚠️") ||
 				strings.HasPrefix(line, "❌") ||
 				strings.HasPrefix(line, "[ERROR]")
-			if !s.echoInString && !indented && bareError && acpErrorHeaderRe.MatchString(line) {
+			if !indented && bareError && acpErrorHeaderRe.MatchString(line) {
 				s.resetEchoJSON()
 			} else {
 				s.consumeEchoJSON(rawLine)
